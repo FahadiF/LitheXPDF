@@ -43,6 +43,7 @@ must be tuned using the benchmark corpus:
 | Temporary encoding output buffer | 32 MiB | Bounded writer aborts at cap; discard partial output |
 | Encoder scratch allocations | 8 MiB initial measurement target | Measure in worker; compatibility milestone must validate encoder behavior |
 | Concurrent result payloads awaiting UI | 1 | Backpressure worker/host until consumed or invalidated |
+| Render response timeout | 30,000 ms initial configurable test default; accepted range 1,000–120,000 ms | Invalidate request/generation, terminate and reap worker asynchronously, return timeout; old worker exits before restart |
 | Worker shutdown grace period | 2 seconds | Terminate child and reclaim its address space |
 
 The 32 MiB bitmap cap follows 8,388,608 pixels × 4 bytes/pixel. These are
@@ -62,6 +63,16 @@ references are dropped; ensure no inactive tab owns references, and measure
 WebView memory separately rather than claiming immediate reclamation.
 Dimension, pixel, encoded-byte, and frame-length checks all occur before
 allocating the corresponding buffer where possible.
+
+The render timeout bounds wait/recovery policy, not memory by itself. It begins
+at worker dispatch and is measured separately from queue delay, PDF open,
+native rendering, encoding, and IPC delivery. Tune it from repeated latency
+measurements on the fixed corpus and supported hardware; retain the 30-second
+value only if the measured tail plus margin fits the product wait target and
+false worker-restart rates remain acceptable. It is not the shutdown grace:
+the 2-second grace starts only after app shutdown sends its framed shutdown
+request. Timeout expiry and child termination/reaping are supervised away from
+the GUI thread.
 
 ## Evidence required before performance claims
 

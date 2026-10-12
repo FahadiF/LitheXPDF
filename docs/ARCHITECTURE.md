@@ -31,8 +31,10 @@ the process working set.
 
 ## Worker binary and Windows packaging
 
-The worker is a separate Cargo workspace crate and binary target at
-`crates/pdfium-worker`, not a thread, Tauri command, or second WebView. The
+The repository-root Cargo workspace contains both the host package at
+`src-tauri` and worker package at `crates/pdfium-worker`, with
+`resolver = "2"`. The worker is a separate binary target, not a thread, Tauri
+command, or second WebView. The
 host package does not link `pdfium-render`. Build the worker for
 `x86_64-pc-windows-msvc`, then stage it as
 `src-tauri/binaries/pdfium-worker-x86_64-pc-windows-msvc.exe`. Configure
@@ -51,6 +53,13 @@ stdout/stderr continuously and parse arbitrary stdout chunks with the frame
 decoder; do not use the plugin's whole-output collection method for this
 persistent binary stream.
 
+From the repository root, build the worker with
+`cargo build --release --target x86_64-pc-windows-msvc -p pdfium-worker`.
+The artifact is `target/x86_64-pc-windows-msvc/release/pdfium-worker.exe`;
+stage it as
+`src-tauri/binaries/pdfium-worker-x86_64-pc-windows-msvc.exe` before the Tauri
+package step. This is the only initially supported Windows package target.
+
 Bundle the pinned `pdfium.dll` and its redistribution notices from
 `src-tauri/resources/pdfium/` as Tauri resources. The host resolves
 `pdfium/pdfium.dll` from Tauri's `BaseDirectory::Resource`, converts it to an
@@ -66,6 +75,11 @@ The worker calls `Pdfium::bind_to_library(absolute_path)`; it must not use
 `Pdfium::default()`, search the current working directory, or silently fall
 back to a system DLL. Missing or mismatched DLLs fail startup with a reported
 error. Test the resolved paths in both development and packaged installs.
+The canonical mapping is
+`src-tauri/resources/pdfium/pdfium.dll` → `pdfium/pdfium.dll` and
+`src-tauri/resources/pdfium/THIRD_PARTY_NOTICES.txt` →
+`pdfium/THIRD_PARTY_NOTICES.txt`. These are required locations, not evidence
+that a compatible DLL has been selected or that packaged loading has passed.
 
 ## Binary IPC framing
 
@@ -165,7 +179,38 @@ as needing reopen, and starts a fresh worker only after the old child has
 exited. It reopens only the currently selected path; background tabs remain
 metadata. Retry policy must be bounded to avoid crash loops and must surface a
 recoverable error. A hung native call cannot be safely cancelled in place;
-the supervisor's timeout terminates the child process.
+the render timeout below causes the supervisor to terminate the child process.
+
+## Render timeout and shutdown grace
+
+The host has a configurable `render_timeout_ms` setting, exposed during
+implementation as `PDFIUM_RENDER_TIMEOUT_MS`. Its provisional initial default
+is 30,000 ms, with an accepted configuration range of 1,000–120,000 ms. This
+deadline covers an admitted render from worker dispatch until a valid response
+arrives; it is independent of and must never reuse the 2,000 ms
+`worker_shutdown_grace_ms` used only for orderly application shutdown.
+
+On render deadline expiry, invalidate the request and active generation, then
+ask the worker supervisor to terminate the child. Process termination and
+child-exit observation run on its dedicated I/O/supervision task (or blocking
+worker thread), never on the GUI thread. Tauri commands await through async
+channels; they do not synchronously wait, join, or poll. The old child must be
+confirmed exited/reaped before a replacement starts. Return a structured
+timeout error and discard late bytes. The shutdown grace timer applies only
+after a framed shutdown request during app exit. Expiry triggers the same
+off-GUI-thread termination path followed by asynchronous exit/reap
+observation. No timeout or termination wait blocks GUI dispatch.
+
+Tune the render deadline from measured dispatch-to-result latency, reported
+separately from open, render, encode, and IPC durations. Use the fixed hashed
+fixture corpus across supported PDF sizes/content types and record machine,
+OS, crate/API/DLL tuple, sample count, and p50/p95/p99/max. Choose a default
+above the observed tail latency plus a recorded margin while staying within
+the product's maximum acceptable wait; validate the false-timeout/restart
+rate under repeated runs. Keep 30 seconds provisional until those measurements
+exist. If supported documents exceed the upper bound, document the limitation
+or propose a separately reviewed design change; do not silently raise limits
+or claim responsiveness from the configured value alone.
 
 ## Responsiveness
 

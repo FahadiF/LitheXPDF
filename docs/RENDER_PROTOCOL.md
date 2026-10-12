@@ -103,6 +103,32 @@ restart increment generation before sending more work. Cancellation removes
 queued work; it does not promise interruption of an active native PDFium call.
 The host may terminate and restart a timed-out worker process.
 
+## Render deadline and shutdown deadline
+
+The host configuration has `render_timeout_ms` (environment override
+`PDFIUM_RENDER_TIMEOUT_MS`), initially 30,000 ms with a validated range of
+1,000–120,000 ms. It measures from dispatch to a validated render response,
+not from enqueue. On expiry, invalidate the request and active generation,
+return a structured timeout error, and ask the supervisor to terminate the
+worker. The termination request and child-exit/reap observation run on the
+worker supervisor's I/O task or a dedicated blocking thread. The Tauri command
+awaits asynchronously; neither timeout handling nor child-process waiting may
+block the GUI thread. Do not start a replacement worker until the old child is
+confirmed exited.
+
+This render deadline is separate from `worker_shutdown_grace_ms`, which is
+2,000 ms and starts only after the app sends a framed shutdown request. Its
+expiry requests termination through the same off-GUI-thread supervisor and
+then awaits process exit asynchronously. Do not reuse the shutdown grace as a
+render timeout or start it when a tab is merely switched.
+
+Tune the provisional render default from repeated dispatch-to-result latency
+measurements (including p50/p95/p99/max, open/render/encode/IPC splits,
+false-timeout and restart rates) over the fixed fixture corpus and supported
+hardware. Choose a measured tail plus recorded margin that remains below the
+product's maximum acceptable wait. Configuration alone is not evidence of
+responsiveness or a memory reduction.
+
 Render output ordering is not relied upon. Request IDs correlate responses;
 generation checks determine whether output is still usable. A worker restart
 invalidates all outstanding IDs. The host rejects duplicate, malformed,

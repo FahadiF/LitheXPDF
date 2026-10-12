@@ -25,15 +25,22 @@ host's queued work and all encoded/decoded images, and prevents new dispatch.
 The one render already executing in PDFium is not cancellable: wait for its
 reply asynchronously, reject it as stale, then close the native document and
 remove tab metadata only after cleanup completes or the worker process has
-been reaped. On app exit,
-stop admission, invalidate work, close the document, shut down the worker, and
-wait; terminate the child after a bounded grace period.
+been reaped. On app exit, stop admission, invalidate work, close the document,
+shut down the worker, and wait asynchronously for at most the separate
+2,000 ms worker shutdown grace; then request child termination and
+asynchronously await/reap its exit. This grace is not a render timeout.
 
 The worker process is the native-resource recovery boundary. A crash or
-unresponsive render invalidates all requests, terminates and reaps the child,
-then starts a replacement with no document. The host may reopen only the
-currently selected tab. Background tabs remain metadata. Retry count is
-bounded and errors are visible.
+render exceeding the configurable 30,000 ms provisional `render_timeout_ms`
+(environment override `PDFIUM_RENDER_TIMEOUT_MS`, valid range 1,000–120,000
+ms) invalidates all requests, terminates and reaps the child, then starts a
+replacement with no document. The render timer starts at worker dispatch. The
+host may reopen only the currently selected tab. Background tabs remain
+metadata. Retry count is bounded and errors are visible. Tune the default
+from measured p50/p95/p99/max latency and false-timeout/restart rates over the
+fixed corpus and supported hardware. No timeout or process-exit wait may block
+the GUI thread; the supervisor handles termination/reaping off-thread and the
+host awaits asynchronously.
 
 ## Consequences
 

@@ -1,9 +1,14 @@
-# PDF Viewer
+# LitheXPDF
 
-An ultra-lightweight Windows PDF reader planned for 30 or more open tabs. The
-application uses Rust, Tauri 2, vanilla TypeScript/HTML/CSS, and PDFium through
+A lightweight Windows PDF reader planned for 30 or more open tabs. LitheXPDF
+uses Rust stable, Tauri 2, vanilla TypeScript/HTML/CSS, and PDFium through
 `pdfium-render`. The frontend never calls PDFium: the Rust backend owns the
 document lifecycle and rendering.
+
+**Working tagline:** Light on memory. Fast through documents.
+
+The product and repository names remain provisional until repository-name
+availability and relevant trademark checks are complete.
 
 This repository is at the planning and environment-verification stage. No
 application code or runtime claims have been made yet.
@@ -24,8 +29,7 @@ application code or runtime claims have been made yet.
 Verified on 2026-10-12 in the current Windows workspace:
 
 - Node.js `v26.5.1`, npm `11.17.0`, and pnpm `11.25.0` are available.
-- Git `2.56.0.windows.2` is available, but this directory is not currently a
-  Git checkout.
+- Git `2.56.0.windows.2` is available in the current repository.
 - Windows reports kernel version `10.0.26200`; the registry identifies the
   product as Windows 10 Pro, 25H2 (build 26200.9550).
 - Rust, Cargo, and rustup are not available on `PATH`.
@@ -60,12 +64,38 @@ adding a frontend framework:
 │   ├── binaries/                # Tauri sidecar target-triple artifact
 │   ├── capabilities/
 │   ├── resources/pdfium/        # pinned DLL and redistribution notices
+│   ├── Cargo.toml               # Tauri host package; workspace member
+│   ├── tauri.conf.json          # Tauri CLI marker and bundle configuration
 │   └── src/                     # Tauri host and worker supervisor
-├── Cargo.toml                   # Cargo workspace
+├── Cargo.toml                   # repository-root Cargo workspace
 ├── package.json
 ├── tsconfig.json
 └── vite.config.ts
 ```
+
+The root `Cargo.toml` must declare `src-tauri` and `crates/pdfium-worker` as
+workspace members (`resolver = "2"`). This is the single workspace arrangement
+used by the commands in `docs/TESTING.md`; do not create a second, nested Cargo
+workspace. The repository currently has neither that manifest nor the host and
+worker package manifests, so this requirement is documented but not yet
+verified against buildable Cargo metadata. The root `package.json` owns the
+vanilla TypeScript frontend and Tauri CLI scripts. Run Cargo checks/tests from
+the repository root, and invoke the Tauri CLI there so it discovers
+`src-tauri/tauri.conf.json` in the standard Tauri project layout.
+
+The required root workspace stanza is:
+
+```toml
+[workspace]
+resolver = "2"
+members = ["src-tauri", "crates/pdfium-worker"]
+default-members = ["src-tauri", "crates/pdfium-worker"]
+```
+
+The initial render timeout is a configurable 30,000 ms test default, separate
+from the 2,000 ms worker shutdown grace period. Both values remain provisional
+until latency and recovery measurements are recorded; see
+[Architecture](docs/ARCHITECTURE.md) and [Testing](docs/TESTING.md).
 
 Worker packaging, binary transport, and the exact PDFium binary/API pairing
 are defined in [Architecture](docs/ARCHITECTURE.md) and remain subject to the

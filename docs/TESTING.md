@@ -32,6 +32,37 @@ strategy on a clean VM. Verify the Tauri raw `Response` arrives as an
 malformed/oversized IPC frames and verify rejection occurs before payload
 allocation.
 
+The workspace layout is fixed for these commands: repository-root
+`Cargo.toml` has `[workspace]`, `resolver = "2"`, and members `"src-tauri"`
+and `"crates/pdfium-worker"`; there is no nested workspace. Run all Cargo
+commands below from the repository root. The root `package.json` owns
+TypeScript scripts and the Tauri CLI, and `src-tauri/tauri.conf.json` is the
+Tauri configuration discovered by the root `pnpm tauri build` command. These
+manifest/config files are not present yet, so commands remain planned until
+the environment milestone creates the scaffold.
+
+For the Windows x64 packaging gate, build from the root with
+`cargo build --release --target x86_64-pc-windows-msvc -p pdfium-worker` and
+stage `target/x86_64-pc-windows-msvc/release/pdfium-worker.exe` as
+`src-tauri/binaries/pdfium-worker-x86_64-pc-windows-msvc.exe`. Its
+`src-tauri/tauri.conf.json` entry is
+`bundle.externalBin: ["binaries/pdfium-worker"]`; Rust launches it with
+`ShellExt::sidecar("pdfium-worker")`. Bundle
+`src-tauri/resources/pdfium/pdfium.dll` as `pdfium/pdfium.dll` and
+`src-tauri/resources/pdfium/THIRD_PARTY_NOTICES.txt` as
+`pdfium/THIRD_PARTY_NOTICES.txt`; resolve the DLL through
+`BaseDirectory::Resource`, then pass the worker the resulting absolute path.
+Do not select a DLL until its API compatibility, hash, redistribution terms,
+and clean-machine load are verified.
+
+The host/worker link is the version-1, 20-byte-header `PDFW` length-prefixed
+binary protocol over raw sidecar stdin/stdout. The WebView image response is
+the same bounded binary envelope returned as `tauri::ipc::Response` and
+received by `invoke()` as an `ArrayBuffer`. Do not substitute JSON/base64 or
+large JSON events. Verify both directions at the 32 MiB encoded-image limit,
+all frame boundaries, malformed/version failures, and pre-allocation length
+rejection.
+
 **Acceptance:** Cargo check, frontend type check, Tauri dev launch, bounded
 full-page render of a known fixture, and packaged install/launch all succeed.
 The exact crate/API/DLL tuple and SHA-256 hashes are recorded and pinned.
@@ -51,13 +82,18 @@ Integration tests race delayed renders against rapid document switches,
 cancel queued renders and verify active native renders are not misreported as
 preempted, and open one fixture, switch paths, close, and observe worker
 acknowledgements. Inject worker exit and startup failure.
+Assert the configurable 30,000 ms provisional render timeout is distinct from
+the fixed 2,000 ms shutdown grace. Use a short test override to verify timeout
+invalidation, asynchronous termination/reap, and restart without blocking GUI
+dispatch.
 
 **Acceptance:** no path allows two live documents/workers; document-switch
 races never bind a result to the wrong document; queued cancellation prevents
 dispatch while active cancellation reports completion/discard accurately;
 stale generations are rejected; orderly close is acknowledged; a crashed
 worker is terminated, reaped, and replaced once without losing background
-metadata.
+metadata. Timeout, shutdown grace, and process-exit observation remain
+separate; no GUI-thread timeout or child wait is permitted.
 
 ## Milestone 2 — bounded asynchronous rendering
 
@@ -84,9 +120,11 @@ worker crash, and malformed IPC.
 
 **Test:** integration suite with corrupt/large/image-heavy fixtures, worker
 termination during idle and render, restart and reopen of only the selected
-tab, malformed IPC termination, and repeated open/close cycles. Confirm the
-old child is reaped before restart. Measure private bytes and working set in
-the parent, worker, and WebView.
+tab, malformed IPC termination, and repeated open/close cycles. Verify timeout
+tuning using dispatch-to-result p50/p95/p99/max, open/render/encode/IPC splits,
+and false-timeout/restart counts across the hashed corpus and supported
+hardware. Confirm the old child is reaped before restart. Measure private
+bytes and working set in the parent, worker, and WebView.
 
 **Acceptance:** the parent remains responsive after worker failure, no stale
 result displays, restart attempts are bounded, and failure is surfaced with a
@@ -118,9 +156,13 @@ pnpm install --frozen-lockfile
 pnpm typecheck
 pnpm test
 cargo test --workspace
+cargo build --release --target x86_64-pc-windows-msvc -p pdfium-worker
 pnpm tauri build
 ```
 
-The exact scripts depend on the scaffold created in Milestone 0. These commands
-are a target checklist, not runnable commands in the current empty repository.
+These commands assume the single repository-root Cargo workspace and root
+package scripts described above. The sidecar staging copy must occur after its
+Cargo build and before `pnpm tauri build`. The commands are not runnable in the
+current repository because the manifests/config and Rust toolchain are absent;
+listing them does not claim that the project compiles.
 

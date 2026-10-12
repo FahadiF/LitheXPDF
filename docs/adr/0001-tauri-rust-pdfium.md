@@ -71,14 +71,37 @@ basename through `ShellExt::sidecar`, resolves the bundled DLL and notices
 through Tauri's resource resolver, and passes the absolute DLL path to the
 worker. The worker binds with `Pdfium::bind_to_library(path)`.
 
+The repository-root `Cargo.toml` is the single workspace manifest with
+`resolver = "2"` and members `src-tauri` and `crates/pdfium-worker`; the host's
+Tauri marker/config remains `src-tauri/tauri.conf.json`. Build the sidecar
+from the root with
+`cargo build --release --target x86_64-pc-windows-msvc -p pdfium-worker`, then
+stage its `.exe` at the target-triple-suffixed path above. The canonical DLL
+resource mapping is
+`src-tauri/resources/pdfium/pdfium.dll` → `pdfium/pdfium.dll`, with notices at
+`src-tauri/resources/pdfium/THIRD_PARTY_NOTICES.txt` →
+`pdfium/THIRD_PARTY_NOTICES.txt`. Resolve the DLL through
+`BaseDirectory::Resource`; never use the process working directory.
+
 Within the worker, one OS thread owns the PDFium library and at most one
 document; serialize all operations. Host/worker messages use bounded,
-versioned binary frames over raw sidecar stdin/stdout. WebView render calls
-return the framed image as a raw Tauri `Response`/`ArrayBuffer`; small metadata
-may use JSON events. Package a pinned Windows PDFium DLL with its notices only
+versioned binary frames over raw sidecar stdin/stdout: 20-byte `PDFW` header,
+version 1, big-endian fields, 64 KiB control/request payload cap, and a 32 MiB
+encoded-image cap plus at most 4 KiB metadata. WebView render calls return the
+framed image as `tauri::ipc::Response::new(Vec<u8>)` and
+`@tauri-apps/api/core` `invoke()` receives an `ArrayBuffer`; small metadata may
+use JSON events. Never transport large image payloads as JSON. Package a
+pinned Windows PDFium DLL with its notices only
 after a compatibility spike verifies the exact crate/API/binary tuple, hashes,
 dynamic loading, and clean-machine packaged launch. Keep the exact PDFium
 tuple open until that gate succeeds.
+
+Use configurable `render_timeout_ms` (`PDFIUM_RENDER_TIMEOUT_MS`) with a
+provisional 30,000 ms default and validated 1,000–120,000 ms range. Keep the
+2,000 ms worker shutdown grace as a separate app-exit-only setting. Tune the
+render deadline from measured dispatch-to-result tail latency and
+false-timeout/restart rates over the fixed corpus; both timeout handling and
+child exit/reap waits remain off the GUI thread.
 
 The worker process is selected over a thread-only worker because a native
 crash/hang cannot be safely cancelled as an ordinary Rust task. The supervisor
