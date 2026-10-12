@@ -1,0 +1,134 @@
+# Render protocol
+
+## Request
+
+Every frontend request identifies a tab and a particular activation of that
+tab. The host assigns a monotonically increasing generation per tab and a
+unique request ID. A request contains:
+
+```text
+protocol_version
+request_id
+tab_id
+generation
+page_index              # zero-based
+zoom                     # finite and range-checked
+target_width_px
+target_height_px
+priority                 # active viewport before prefetch
+```
+
+Paths are sent only in backend activation/open commands, never in a render
+request from the browser. The worker's open state binds the active tab ID and
+generation to one document. The host validates every field, active-tab
+ownership, page bounds, zoom range, pixel cap, queue depth, and protocol
+version before dispatch. It rejects an invalid or over-limit request without
+allocating a bitmap.
+
+## Result
+
+Every successful result echoes `request_id`, `tab_id`, and `generation`, and
+contains page index, pixel dimensions, content type, and encoded image bytes.
+Every failure includes those identifiers plus a stable error code. Never
+return a raw pointer, PDFium object, or unbounded allocation to TypeScript.
+
+## Host/worker binary framing
+
+Host and worker exchange frames over the sidecar's stdin/stdout byte streams;
+stderr is reserved for diagnostics. Each frame is a 20-byte header followed
+by its payload:
+
+| Offset | Size | Field | Encoding |
+| ---: | ---: | --- | --- |
+| 0 | 4 | Magic `PDFW` | ASCII bytes |
+| 4 | 2 | Protocol version (`1`) | unsigned big-endian |
+| 6 | 2 | Message kind | unsigned big-endian enum |
+| 8 | 8 | Request ID | unsigned big-endian |
+| 16 | 4 | Payload length | unsigned big-endian byte count |
+| 20 | length | Payload | Kind-specific binary fields |
+
+Message kinds are `OPEN=0x0001`, `RENDER=0x0002`, `CLOSE=0x0003`,
+`SHUTDOWN=0x0004`, `READY=0x8001`, `ACK=0x8002`, `PAGE=0x8003`, and
+`ERROR=0x80ff`. `READY` is the first worker frame and uses request ID zero;
+all other request/reply frames use the originating nonzero request ID.
+`OPEN` payload is tab ID (16 bytes), generation (u64), UTF-8 path length
+(u32), then exactly that many path bytes. `RENDER` payload is tab ID (16),
+generation (u64), page index (u32), zoom as IEEE-754 binary64, width/height
+(u32 each), priority (u8), and three reserved zero bytes. `CLOSE` payload is
+tab ID (16) and generation (u64); `SHUTDOWN` has an empty payload. All
+multi-byte fields use network byte order (big-endian). `READY`, `ACK`, and
+`ERROR` are small fixed/length-checked control payloads; `ERROR` includes a
+stable u16 code and a length-prefixed UTF-8 diagnostic capped at 4 KiB.
+
+Render/open/control requests and non-image responses have a maximum 64 KiB
+payload. A `PAGE` response contains fixed metadata (tab ID as 16 bytes,
+generation as u64, page index/width/height as u32, content type as u16, and
+encoded image length as u32) followed by encoded image bytes. Metadata may not
+exceed 4 KiB; encoded image bytes may not exceed 32 MiB. Validate the declared
+frame length against the kind-specific cap before allocating. Read exactly
+the declared payload; pipe chunk boundaries have no protocol meaning. Validate
+all fixed-size fields and require the payload length to equal the exact fields
+plus `encoded image length`.
+
+Reject bad magic, unsupported version, unknown kind, invalid identifiers,
+overflowing/over-limit lengths, invalid dimensions, truncated frames,
+malformed fields, and duplicate/unexpected request IDs. Do not parse partial
+data as a new frame or allocate from an unchecked length. Fail the request;
+for framing corruption terminate/reap and restart the worker rather than
+trying to resynchronize the byte stream. Both endpoints enforce the same
+limits.
+
+## Rust-to-WebView binary response
+
+Render is an async Tauri command. It returns the bounded binary render-result
+frame with `tauri::ipc::Response::new(Vec<u8>)`; Tauri's raw IPC response is
+received by `invoke()` as an `ArrayBuffer`. TypeScript parses and validates
+the frame before creating a `Blob`/object URL. Small status and lifecycle
+metadata may use JSON commands/events. Image payloads must never be returned
+as JSON arrays, base64 strings, or JSON events. This path is documented by
+Tauri and still requires a WebView2 smoke test at the configured size cap.
+
+The host accepts a result only if its request is still registered and the tab
+is still active at the same generation. The frontend repeats the same check
+before displaying it. Any mismatch is stale: discard bytes and release
+references immediately. This double-check makes a delayed Tauri response harmless
+after a tab switch or close.
+
+## Scheduling, cancellation, and ordering
+
+The host limits the queue to two pending requests and one in-flight render.
+New active viewport requests supersede queued requests for the same tab/page
+and lower-priority prefetch. Activation, deactivation, close, and worker
+restart increment generation before sending more work. Cancellation removes
+queued work; it does not promise interruption of an active native PDFium call.
+The host may terminate and restart a timed-out worker process.
+
+Render output ordering is not relied upon. Request IDs correlate responses;
+generation checks determine whether output is still usable. A worker restart
+invalidates all outstanding IDs. The host rejects duplicate, malformed,
+wrong-version, and oversized responses.
+
+## Image lifetime
+
+Render a full page only, with width and height each at most 8,192 px, at most
+8,388,608 total pixels, and at most 32 MiB RGBA. Encode through a bounded
+writer with a hard 32 MiB output cap. If the cap is exceeded, abort encoding,
+discard partial output, and return `IMAGE_TOO_LARGE`; do not retry at a larger
+size or stream an unbounded response. Keep at most one result awaiting the
+frontend. The frontend may retain a byte-accounted 64 MiB encoded LRU for the
+active tab only. On deactivation, clear that tab's encoded cache and all
+decoded WebView image references, clear image element sources, and revoke
+object URLs before switching. Inactive tabs retain no full-page encoded or
+decoded images. Never store image data in tab metadata or persist it to disk.
+
+The initial renderer is bounded full-page rendering. Do not add tile/partial
+rendering, multiple live documents, or additional renderer workers without
+benchmark evidence and a separately reviewed architecture change.
+
+## Future protocol evolution
+
+Use explicit versioning and reject unsupported versions. Any future streaming,
+partial-tile, or multiple-document protocol requires a new reviewed decision;
+it must preserve bounded buffering and the one-document limit until measured
+evidence supports changing them.
+
