@@ -4,6 +4,5 @@
 /src-tauri/target/
 /src-tauri/gen/
 /src-tauri/binaries/pdfium-worker-*.exe
-/src-tauri/resources/pdfium/pdfium.dll
 *.pdfium-tmp
 

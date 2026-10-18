@@ -1,7 +1,7 @@
 # ADR 0001: Tauri, Rust, and PDFium
 
-- Status: Accepted for the initial implementation; PDFium artifact pairing
-  remains a Milestone 0 verification gate.
+- Status: Accepted for worker-only smoke integration; clean packaged execution
+  and production host/worker integration remain open.
 - Date: 2026-10-12
 
 ## Context
@@ -18,12 +18,12 @@ explicit boundary.
   guarantees and should be assumed not thread-safe. It provides a
   `thread_safe` feature that serializes calls behind a mutex; keep it enabled
   initially, but still route calls through one owner thread.
-- Current crate documentation is for `pdfium-render` 0.9.4. Its default
-  `pdfium_latest` API feature is currently `pdfium_7881`; the runtime DLL must
-  match the API the crate binds to. This API default may lag current upstream
-  binary releases. Milestone 0 must test a matching archived binary and decide
-  whether to pin that pair or select a different supported release. Never
-  follow a floating `latest` DLL in a reproducible build.
+- `pdfium-render` 0.9.4 exposes explicit `pdfium_7881` and related binding
+  features; its default `pdfium_latest` currently aliases `pdfium_7881`. It
+  does not expose a numbered binding for the newer 8086 build used in the
+  worker smoke test. The worker disables default features and pins
+  `pdfium_7881`, `image_025`, and `thread_safe` explicitly. Never follow a
+  floating `latest` DLL or API feature in a reproducible build.
 - `pdfium-render` does not include PDFium. It supports dynamic runtime
   binding, which is the selected distribution direction for Windows. The
   `bblanchon/pdfium-binaries` project publishes Windows x64, x86, and arm64
@@ -34,8 +34,10 @@ explicit boundary.
   Apache 2.0 text; PDFium also incorporates third-party components with their
   own notices/licenses. The binary distributor's repository has its own
   license, which is not a substitute for auditing the bundled PDFium artifact
-  and its notices. Before release, generate and review a complete dependency
-  and native-binary attribution inventory for the exact pinned build.
+  and its notices. The selected archive contains its root `LICENSE` and 17
+  files under `licenses/`; those actual texts are concatenated into the
+  bundled `THIRD_PARTY_NOTICES.txt` with source-file headings. The archive's
+  own notice files must be refreshed and rechecked on any runtime upgrade.
 - Tauri 2's official Windows prerequisites call for Microsoft C++ Build Tools
   and WebView2. Its Windows installer can use the system WebView2 runtime,
   download/embed a bootstrapper, embed the offline installer, or bundle a
@@ -71,6 +73,21 @@ basename through `ShellExt::sidecar`, resolves the bundled DLL and notices
 through Tauri's resource resolver, and passes the absolute DLL path to the
 worker. The worker binds with `Pdfium::bind_to_library(path)`.
 
+The current worker smoke-test selection is official bblanchon release
+`chromium/8086`, PDFium `157.0.8086.0`, commit
+`5325fa6d0d9379329f10f98fdc4839b4e40f2e79`, asset
+`pdfium-win-x64.tgz`. GitHub's release API digest and the locally computed
+archive SHA-256 both equal
+`1fd8af952832dbb0eb16d9249f68fe09e5f5ebf7c3dd9f6066ea2720cc28487d`. The
+locally computed extracted `pdfium.dll` SHA-256 is
+`1f2aee4286b8cf0413ab4562b7121aa454f9cfd9afd6ca8609bcef80927b3f80`.
+With the `pdfium_7881` binding, the worker's real fixture subprocess test
+loaded this newer x64 DLL, opened a one-page PDF, reported its 200×120 point
+page, rendered a 200×120 PNG, and exited successfully. This proves the tested
+function path only; it is not a claim that every newer API binding call or a
+packaged Tauri load works. The exact release facts and dumpbin imports are in
+`docs/TESTING.md`.
+
 The repository-root `Cargo.toml` is the single workspace manifest with
 `resolver = "2"` and members `src-tauri` and `crates/pdfium-worker`; the host's
 Tauri marker/config remains `src-tauri/tauri.conf.json`. Build the sidecar
@@ -80,8 +97,10 @@ stage its `.exe` at the target-triple-suffixed path above. The canonical DLL
 resource mapping is
 `src-tauri/resources/pdfium/pdfium.dll` → `pdfium/pdfium.dll`, with notices at
 `src-tauri/resources/pdfium/THIRD_PARTY_NOTICES.txt` →
-`pdfium/THIRD_PARTY_NOTICES.txt`. Resolve the DLL through
-`BaseDirectory::Resource`; never use the process working directory.
+`pdfium/THIRD_PARTY_NOTICES.txt`. These mappings are now active in Tauri
+configuration. Resolve the DLL through `BaseDirectory::Resource`; never use
+the process working directory. The host resolver and packaged execution have
+not yet been implemented or tested.
 
 Within the worker, one OS thread owns the PDFium library and at most one
 document; serialize all operations. Host/worker messages use bounded,
@@ -91,10 +110,10 @@ encoded-image cap plus at most 4 KiB metadata. WebView render calls return the
 framed image as `tauri::ipc::Response::new(Vec<u8>)` and
 `@tauri-apps/api/core` `invoke()` receives an `ArrayBuffer`; small metadata may
 use JSON events. Never transport large image payloads as JSON. Package a
-pinned Windows PDFium DLL with its notices only
-after a compatibility spike verifies the exact crate/API/binary tuple, hashes,
-dynamic loading, and clean-machine packaged launch. Keep the exact PDFium
-tuple open until that gate succeeds.
+The exact worker crate/API/binary tuple, archive and DLL hashes, and local
+dynamic load/open/render/close smoke path have passed. Keep clean-machine
+runtime dependency checks, Tauri resource lookup, packaged loading, and
+installer verification as release gates.
 
 Use configurable `render_timeout_ms` (`PDFIUM_RENDER_TIMEOUT_MS`) with a
 provisional 30,000 ms default and validated 1,000–120,000 ms range. Keep the

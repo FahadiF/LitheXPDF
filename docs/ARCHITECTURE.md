@@ -81,15 +81,45 @@ The canonical mapping is
 `pdfium/THIRD_PARTY_NOTICES.txt`. These are required locations, not evidence
 that a compatible DLL has been selected or that packaged loading has passed.
 
-**Scaffold packaging exception:** while no verified PDFium distribution has
-been selected, the active `src-tauri/tauri.conf.json` intentionally omits
-`bundle.resources`, so development workspace checks do not require or package
-missing/unverified native artifacts. The Windows worker sidecar configuration
-remains active. This configuration is not release-ready: before any release
-package is built, restore the exact source-to-target mappings above and add
-the verified DLL and its real redistribution notices. Release acceptance is
-blocked until the compatibility, hash, licensing, and clean-machine packaging
-gates pass. Do not add placeholder files to satisfy the scaffold build.
+**Selected worker smoke-test runtime:** PDFium `157.0.8086.0` from official
+release tag `chromium/8086` is staged at
+`src-tauri/resources/pdfium/pdfium.dll`. `pdfium-render` is pinned to `=0.9.4`
+in the worker only, with default features disabled and explicit
+`pdfium_7881`, `image_025`, and `thread_safe` features. The 8086 release is
+newer than the API feature's numbered baseline; a Windows subprocess test
+successfully loaded this DLL through that binding, opened the deterministic
+fixture, read its page count/dimensions, rendered page one, encoded a PNG, and
+exited after dropping page/document objects. This verifies the exact exercised
+path, not every PDFium API function or packaged execution.
+
+The release archive SHA-256 reported by GitHub and independently computed
+locally is
+`1fd8af952832dbb0eb16d9249f68fe09e5f5ebf7c3dd9f6066ea2720cc28487d`; the
+extracted DLL SHA-256 is
+`1f2aee4286b8cf0413ab4562b7121aa454f9cfd9afd6ca8609bcef80927b3f80`. The
+archive's actual `LICENSE` and all 17 files in `licenses/` were included,
+verbatim, in `resources/pdfium/THIRD_PARTY_NOTICES.txt`. `dumpbin /DEPENDENTS`
+reported `KERNEL32.dll`, `ADVAPI32.dll`, `GDI32.dll`, and `USER32.dll`; no
+separate VC runtime DLL appeared in that import list. Clean-machine dependency
+and packaged-load verification remain outstanding.
+
+The active `src-tauri/tauri.conf.json` now maps
+`resources/pdfium/pdfium.dll` → `pdfium/pdfium.dll` and
+`resources/pdfium/THIRD_PARTY_NOTICES.txt` →
+`pdfium/THIRD_PARTY_NOTICES.txt`. The host does not yet resolve or pass this
+path because sidecar IPC/launch integration is not implemented. Keep the
+target-triple-named worker sidecar configuration unchanged. Do not claim a
+Tauri package or installer works until its resource lookup and execution have
+been tested.
+
+**Dependency selection:** only `crates/pdfium-worker` declares
+`pdfium-render =0.9.4`, with `default-features = false` and explicit features
+`pdfium_7881`, `image_025`, and `thread_safe`; direct `image =0.25.10` enables
+only the PNG encoder feature. `Cargo.lock` records the resolved graph. The
+Tauri host and frontend do not link or call PDFium. The worker smoke test
+establishes this runtime/API pairing for the exercised open/page-metadata/
+render calls. Broader API coverage, host handoff of the resolved resource
+path, and clean packaged execution remain unverified.
 
 ## Binary IPC framing
 
