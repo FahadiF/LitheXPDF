@@ -1,0 +1,5 @@
+packages: []
+
+# esbuild supplies the native transform binary used by Vite and Vitest.
+allowBuilds:
+  esbuild: true

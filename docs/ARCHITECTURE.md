@@ -81,6 +81,16 @@ The canonical mapping is
 `pdfium/THIRD_PARTY_NOTICES.txt`. These are required locations, not evidence
 that a compatible DLL has been selected or that packaged loading has passed.
 
+**Scaffold packaging exception:** while no verified PDFium distribution has
+been selected, the active `src-tauri/tauri.conf.json` intentionally omits
+`bundle.resources`, so development workspace checks do not require or package
+missing/unverified native artifacts. The Windows worker sidecar configuration
+remains active. This configuration is not release-ready: before any release
+package is built, restore the exact source-to-target mappings above and add
+the verified DLL and its real redistribution notices. Release acceptance is
+blocked until the compatibility, hash, licensing, and clean-machine packaging
+gates pass. Do not add placeholder files to satisfy the scaffold build.
+
 ## Binary IPC framing
 
 Host/worker transport is a duplex byte stream on the sidecar's stdin/stdout;

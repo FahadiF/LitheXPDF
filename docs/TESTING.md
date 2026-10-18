@@ -1,25 +1,29 @@
 # Testing and milestone plan
 
-No implementation or tests have been run yet. Each milestone adds a concrete
-verification gate before expanding scope.
+The Milestone 0 scaffold is in progress. No reader features or PDFium runtime
+integration have been implemented. Each milestone adds a concrete verification
+gate before expanding scope.
 
-The Milestone 0 environment inventory has started. It is currently blocked
-before compilation because `rustup`, `rustc`, `cargo`, and the Tauri CLI are
-not installed or available on `PATH`, and the official rustup bootstrap
-download was blocked by the environment's socket/network restrictions; see the
-snapshot in `README.md`.
+The root workspace, minimal Tauri host, explicit worker placeholder, vanilla
+TypeScript shell, and frontend configuration are scaffolded. Rust checks and
+Tauri launch remain blocked because `rustup`, `rustc`, and `cargo` are not
+installed or available on `PATH`. The project-local Tauri CLI is available
+through pnpm. No PDFium binary has been selected or bundled. The pnpm lock and
+frontend checks are recorded below; see the environment snapshot in
+`README.md`.
 
 ## Milestone 0 — environment and compatibility (current scope)
 
-Install stable Rust with the MSVC target and Tauri CLI. Establish the workspace
-and a separate `crates/pdfium-worker` binary target, plus the minimal Tauri 2
-host and vanilla TypeScript shell. Configure and build the x64 MSVC sidecar,
-load the PDFium DLL by an absolute Tauri resource path, and do only the
+Complete the environment and compatibility gate. Install stable Rust with the
+MSVC target; run Cargo metadata/checks for the scaffold; build and stage the
+x64 MSVC sidecar; then verify absolute Tauri resource loading and the
 open/render/close compatibility smoke test. Pin the exact `pdfium-render`
 crate version, API binding feature, and matching PDFium Windows x64 revision.
 Verify binary archive hashes, redistribution notices, resource location,
 sidecar target-triple naming, and packaged launch on a clean Windows
-environment. Do not implement tabs/UI features beyond the smoke harness.
+environment. The workspace/host/worker/frontend scaffold exists, but none of
+these Rust or PDFium gates has passed. Do not implement reader features in
+this milestone.
 
 **Test:** clean-machine launch/open/full-page-render/close smoke test; CI build
 of the Windows x64 executable and chosen installer. Record `rustc -Vv`, Tauri
@@ -37,9 +41,7 @@ The workspace layout is fixed for these commands: repository-root
 and `"crates/pdfium-worker"`; there is no nested workspace. Run all Cargo
 commands below from the repository root. The root `package.json` owns
 TypeScript scripts and the Tauri CLI, and `src-tauri/tauri.conf.json` is the
-Tauri configuration discovered by the root `pnpm tauri build` command. These
-manifest/config files are not present yet, so commands remain planned until
-the environment milestone creates the scaffold.
+Tauri configuration discovered by the root Tauri CLI scripts.
 
 For the Windows x64 packaging gate, build from the root with
 `cargo build --release --target x86_64-pc-windows-msvc -p pdfium-worker` and
@@ -54,6 +56,13 @@ stage `target/x86_64-pc-windows-msvc/release/pdfium-worker.exe` as
 `BaseDirectory::Resource`, then pass the worker the resulting absolute path.
 Do not select a DLL until its API compatibility, hash, redistribution terms,
 and clean-machine load are verified.
+
+For the current scaffold only, `tauri.conf.json` intentionally omits
+`bundle.resources` because no verified PDFium DLL or redistribution notices
+are present. This omission lets Cargo workspace checks run without fabricating
+compatibility artifacts; it does not satisfy release packaging. Restore both
+exact mappings above with the verified files before building any distributable
+package. Treat package/release acceptance as blocked until that gate passes.
 
 The host/worker link is the version-1, 20-byte-header `PDFW` length-prefixed
 binary protocol over raw sidecar stdin/stdout. The WebView image response is
@@ -70,6 +79,49 @@ Missing DLL, version mismatch, malformed IPC, or unsupported architecture
 produces a useful error rather than an unbounded allocation or crash. The
 selected license notices ship with the package. This milestone produces no
 memory-improvement claim.
+
+### Scaffold execution record — 2026-10-12
+
+Implemented the repository-root Cargo workspace, Tauri host bootstrap, shell
+plugin registration, capability/configuration, separate non-rendering worker
+placeholder, vanilla frontend, pnpm scripts, Vite/Vitest configuration, and
+Windows sidecar staging script. The root workspace and Tauri config files
+exist, but Cargo metadata has not been evaluated because Cargo is unavailable.
+`Cargo.lock` exists and the target-triple Windows sidecar is staged; no PDFium
+DLL or redistribution notices have been selected or added.
+
+Executed checks and results:
+
+- `pnpm install --lockfile-only --ignore-scripts` — completed and generated
+  `pnpm-lock.yaml`; registry requests emitted transient `EACCES` warnings
+  during metadata resolution.
+- `pnpm install --frozen-lockfile` — first stopped at pnpm's ignored-build
+  guard for `esbuild`. Added a project allowlist for `esbuild` only, then reran
+  successfully; 64 packages were installed.
+- `pnpm typecheck` — passed (`tsc --noEmit`).
+- `pnpm test` — passed; 1 frontend scaffold test.
+- `pnpm build` — passed; TypeScript check and Vite production bundle completed.
+- `pnpm tauri --version` — passed; local `tauri-cli 2.12.2`.
+- `pnpm tauri info` — reported WebView2 `154.0.4258.62`, Visual Studio Build
+  Tools 2026, Node `26.5.1`, pnpm `11.25.0`, and no `rustc`, Cargo, or rustup.
+- `node --check scripts/stage-worker-windows.mjs` — passed.
+- Parsed `package.json` and `src-tauri/tauri.conf.json` with Node — passed.
+- `git diff --check` — passed with no whitespace errors.
+
+Follow-up scaffold resource check (2026-10-12): removed the missing PDFium
+entries from active `bundle.resources` while retaining the Windows sidecar
+configuration; the exact future mappings and release block are documented
+above. JSON parsing of `tauri.conf.json` passed, and the staged sidecar exists.
+`cargo check --workspace --all-targets` and `cargo test --workspace` were each
+attempted; both could not start because `cargo` is not installed or available
+on `PATH` (PowerShell reported that `cargo` is not recognized). A fresh
+`git diff --check` passed with exit code 0; Git printed only LF-to-CRLF
+normalization warnings for existing changed text files.
+
+Cargo check/test, Tauri dev launch/build, PDFium loading/rendering, and
+clean-machine packaging remain unverified. The exact PDFium crate/API/DLL tuple,
+hashes, notices, and native runtime dependencies remain an explicit blocked
+compatibility gate.
 
 ## Milestone 1 — worker lifecycle and protocol
 
@@ -157,12 +209,14 @@ pnpm typecheck
 pnpm test
 cargo test --workspace
 cargo build --release --target x86_64-pc-windows-msvc -p pdfium-worker
-pnpm tauri build
+pnpm worker:stage:windows
+pnpm tauri:build
 ```
 
 These commands assume the single repository-root Cargo workspace and root
-package scripts described above. The sidecar staging copy must occur after its
-Cargo build and before `pnpm tauri build`. The commands are not runnable in the
-current repository because the manifests/config and Rust toolchain are absent;
-listing them does not claim that the project compiles.
+package scripts described above. Sidecar staging follows its Cargo build and
+precedes `pnpm tauri:build`. Frontend commands have been run; Cargo and Tauri
+application builds remain unavailable because Rust/Cargo are absent. The
+sidecar is staged, but verified PDFium resources are absent. Listing commands
+does not claim that the project compiles.
 

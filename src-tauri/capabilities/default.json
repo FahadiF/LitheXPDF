@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Minimal LitheXPDF desktop shell permissions",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
