@@ -5,10 +5,7 @@ uses Rust stable, Tauri 2, vanilla TypeScript/HTML/CSS, and PDFium through
 `pdfium-render`. The frontend never calls PDFium: the Rust backend owns the
 document lifecycle and rendering.
 
-**Working tagline:** Light on memory. Fast through documents.
-
-The product and repository names remain provisional until repository-name
-availability and relevant trademark checks are complete.
+**Light on memory. Fast through documents.**
 
 This repository now contains a minimal Tauri/frontend scaffold. PDF rendering,
 worker IPC, tab behavior, and reader features are not implemented. The worker
