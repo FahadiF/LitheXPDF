@@ -5,12 +5,15 @@ integration have been implemented. Each milestone adds a concrete verification
 gate before expanding scope.
 
 The root workspace, minimal Tauri host, explicit worker placeholder, vanilla
-TypeScript shell, and frontend configuration are scaffolded. Rust checks and
-Tauri launch remain blocked because `rustup`, `rustc`, and `cargo` are not
-installed or available on `PATH`. The project-local Tauri CLI is available
-through pnpm. No PDFium binary has been selected or bundled. The pnpm lock and
-frontend checks are recorded below; see the environment snapshot in
-`README.md`.
+TypeScript shell, and frontend configuration are scaffolded. In the current
+PowerShell session, Rust stable is active (`stable-x86_64-pc-windows-msvc`,
+`rustc`/`cargo` 1.99.0), and `cargo check`, `cargo test`, and the Windows worker
+release build pass after adding the application icon. `pnpm` 11.25.0 and the
+local Tauri CLI are available in this session. A separate earlier Tauri
+development launch failed because `pnpm` was not found in that launch process's
+`PATH`; rerun the launch from an environment that exposes pnpm. No PDFium
+binary has been selected or bundled. See the historical environment snapshot
+and current verification record below.
 
 ## Milestone 0 — environment and compatibility (current scope)
 
@@ -21,9 +24,9 @@ open/render/close compatibility smoke test. Pin the exact `pdfium-render`
 crate version, API binding feature, and matching PDFium Windows x64 revision.
 Verify binary archive hashes, redistribution notices, resource location,
 sidecar target-triple naming, and packaged launch on a clean Windows
-environment. The workspace/host/worker/frontend scaffold exists, but none of
-these Rust or PDFium gates has passed. Do not implement reader features in
-this milestone.
+environment. The Rust workspace checks and worker build pass, but PDFium
+compatibility, runtime loading/rendering, and release packaging remain
+unverified. Do not implement reader features in this milestone.
 
 **Test:** clean-machine launch/open/full-page-render/close smoke test; CI build
 of the Windows x64 executable and chosen installer. Record `rustc -Vv`, Tauri
@@ -86,7 +89,8 @@ Implemented the repository-root Cargo workspace, Tauri host bootstrap, shell
 plugin registration, capability/configuration, separate non-rendering worker
 placeholder, vanilla frontend, pnpm scripts, Vite/Vitest configuration, and
 Windows sidecar staging script. The root workspace and Tauri config files
-exist, but Cargo metadata has not been evaluated because Cargo is unavailable.
+exist. The 2026-10-12 environment snapshot below recorded that Cargo was not
+available then; the active Rust toolchain is now installed and verified.
 `Cargo.lock` exists and the target-triple Windows sidecar is staged; no PDFium
 DLL or redistribution notices have been selected or added.
 
@@ -118,10 +122,43 @@ on `PATH` (PowerShell reported that `cargo` is not recognized). A fresh
 `git diff --check` passed with exit code 0; Git printed only LF-to-CRLF
 normalization warnings for existing changed text files.
 
-Cargo check/test, Tauri dev launch/build, PDFium loading/rendering, and
-clean-machine packaging remain unverified. The exact PDFium crate/API/DLL tuple,
-hashes, notices, and native runtime dependencies remain an explicit blocked
-compatibility gate.
+The 2026-10-12 Cargo check/test attempts could not start because Cargo was
+unavailable at that time. The exact PDFium crate/API/DLL tuple, hashes, notices,
+and native runtime dependencies remain an explicit blocked compatibility gate.
+
+### Windows icon and Rust verification — 2026-10-18
+
+The pre-fix host build and workspace test logs reached `tauri-build` and failed
+because `src-tauri/icons/icon.ico` was missing. A separate earlier `pnpm tauri
+dev` launch failed because `pnpm` was not found in that launch process's
+`PATH`. Added an original `src-tauri/icons/lithexpdf.svg`, generated assets
+with `pnpm exec tauri icon src-tauri/icons/lithexpdf.svg --output
+src-tauri/icons`, and configured the generated PNG, ICNS, and ICO files in
+`bundle.icon`. The generated ICO passed structural validation (ICO header,
+six image entries, and in-file image bounds).
+
+Current PowerShell toolchain: `rustup show active-toolchain` reports
+`stable-x86_64-pc-windows-msvc`; `rustc --version` is 1.99.0,
+`cargo --version` is 1.99.0, and `pnpm --version` is 11.25.0. The staged worker
+retains the target-triple name
+`src-tauri/binaries/pdfium-worker-x86_64-pc-windows-msvc.exe`.
+
+Commands run from the repository root on 2026-10-18:
+
+- `cargo check --workspace --all-targets` — exit 0; Tauri host and workspace
+  targets checked successfully.
+- `cargo test --workspace` — exit 0; all targets and doc tests completed, with
+  zero Rust tests currently defined.
+- `cargo build --release --target x86_64-pc-windows-msvc -p pdfium-worker` —
+  exit 0; optimized Windows x64 worker build completed. The staging script
+  copied it to the existing target-triple sidecar path.
+- `git diff --check` — exit 0; Git emitted only LF-to-CRLF normalization
+  warnings for changed text files.
+
+The prior missing-icon build failures are resolved by the generated icon.
+The earlier Tauri development launch has not been rerun; the current session
+does expose pnpm. PDFium loading/rendering and distributable release packaging
+remain unverified, and no memory improvement is claimed.
 
 ## Milestone 1 — worker lifecycle and protocol
 
@@ -215,8 +252,10 @@ pnpm tauri:build
 
 These commands assume the single repository-root Cargo workspace and root
 package scripts described above. Sidecar staging follows its Cargo build and
-precedes `pnpm tauri:build`. Frontend commands have been run; Cargo and Tauri
-application builds remain unavailable because Rust/Cargo are absent. The
-sidecar is staged, but verified PDFium resources are absent. Listing commands
-does not claim that the project compiles.
+precedes `pnpm tauri:build`. Current Cargo checks, workspace tests, and the
+Windows worker release build pass. An earlier Tauri development launch failed
+because pnpm was not found in that launch process's `PATH`; pnpm is available
+in the current PowerShell session. The sidecar is staged, but verified PDFium
+resources are absent. PDFium loading/rendering and release packaging remain
+unverified; listing commands does not claim otherwise.
 
