@@ -1,5 +1,14 @@
 # Architecture
 
+## Milestone 1 implementation status
+
+The current vertical slice has a single open-document UI, native PDF picker,
+page navigation, asynchronous Tauri commands, a supervised worker sidecar, and
+raw binary page responses. It does not implement a tab strip or persistent
+background-tab metadata yet. The worker protocol codec is shared in
+`crates/pdfium-protocol`; only the worker links `pdfium-render`. UI/manual
+WebView2 and packaged-install validation status is tracked in `docs/TESTING.md`.
+
 ## Boundaries
 
 ```text
@@ -103,14 +112,17 @@ reported `KERNEL32.dll`, `ADVAPI32.dll`, `GDI32.dll`, and `USER32.dll`; no
 separate VC runtime DLL appeared in that import list. Clean-machine dependency
 and packaged-load verification remain outstanding.
 
-The active `src-tauri/tauri.conf.json` now maps
+The active `src-tauri/tauri.conf.json` maps
 `resources/pdfium/pdfium.dll` → `pdfium/pdfium.dll` and
 `resources/pdfium/THIRD_PARTY_NOTICES.txt` →
-`pdfium/THIRD_PARTY_NOTICES.txt`. The host does not yet resolve or pass this
-path because sidecar IPC/launch integration is not implemented. Keep the
-target-triple-named worker sidecar configuration unchanged. Do not claim a
-Tauri package or installer works until its resource lookup and execution have
-been tested.
+`pdfium/THIRD_PARTY_NOTICES.txt`. The host resolves the DLL at startup from
+`BaseDirectory::Resource` in packaged builds and from the host manifest's
+`resources/pdfium/pdfium.dll` in development, canonicalizes the result, and
+passes it as an independent sidecar argument. The worker is launched lazily
+through `ShellExt::sidecar("pdfium-worker")` with raw stdout/stderr. The
+target-triple-named sidecar configuration is unchanged. The mapping and code
+compile, but packaged resource lookup and clean-machine execution remain
+unverified.
 
 **Dependency selection:** only `crates/pdfium-worker` declares
 `pdfium-render =0.9.4`, with `default-features = false` and explicit features
@@ -118,16 +130,18 @@ been tested.
 only the PNG encoder feature. `Cargo.lock` records the resolved graph. The
 Tauri host and frontend do not link or call PDFium. The worker smoke test
 establishes this runtime/API pairing for the exercised open/page-metadata/
-render calls. Broader API coverage, host handoff of the resolved resource
-path, and clean packaged execution remain unverified.
+render calls. Broader API coverage, host resource lookup in a packaged
+installation, and clean packaged execution remain unverified.
 
 ## Binary IPC framing
 
-Host/worker transport is a duplex byte stream on the sidecar's stdin/stdout;
-stderr is diagnostics only. Use length-prefixed frames, never line-delimited
-JSON. The host sends only one command at a time; its bounded queue holds at
-most two pending requests without writing them to the pipe. This makes queued
-cancellation local and keeps kernel pipe buffers from becoming an unbounded
+Host/worker transport is a duplex byte stream on sidecar stdin/stdout; stderr
+is continuously drained as diagnostics. Use length-prefixed frames, never
+line-delimited JSON. The host sends one command at a time; a two-permit pending
+admission semaphore allows at most two queued renders plus the command
+currently owning the operation lock. Queued cancellation marks the request so
+it is rejected before it writes to the pipe. The worker runs synchronously on
+its main OS thread. This keeps kernel pipe buffers from becoming an unbounded
 work queue. Each frame has a 20-byte header: 4-byte ASCII magic `PDFW`, 2-byte
 protocol version (unsigned big-endian, initially `1`), 2-byte message kind,
 8-byte request ID, and 4-byte payload length (unsigned big-endian), followed by
@@ -157,6 +171,10 @@ test at the payload cap, stop and evaluate another verified binary transport
 before feature work.
 
 ## Tab lifecycle
+
+The Milestone 1 UI currently uses one document identity and one page index;
+the multi-tab states below remain the design for later milestones and have no
+tab-strip implementation yet.
 
 Each tab stores only a stable `tab_id`, canonical document path, current page
 index, zoom, scroll position, and a monotonically increasing generation. Tab
@@ -197,8 +215,10 @@ No PDFium call runs on the Tauri GUI thread, a Tauri async-runtime thread, or a
 second worker thread. The host uses asynchronous sidecar I/O and async
 channels to await replies; no GUI callback performs blocking reads, joins,
 shutdown waits, or child-process waits. The worker drops per-render
-bitmaps/pages after encoding each response and drops the document before
-library shutdown. RAII and explicit close messages provide orderly cleanup;
+bitmaps/pages after encoding each response and drops the active document on
+CLOSE. `pdfium-render` is bound once and held for the worker lifetime because
+its document API borrows the library; process shutdown unloads the library.
+RAII and explicit close messages provide orderly cleanup;
 Rust memory safety alone cannot prove native PDFium allocations are leak-free.
 
 On normal tab deactivation, the host increments the generation, discards its
@@ -213,13 +233,15 @@ await/reap process exit, and only
 then complete app exit. Use Tauri's exit-request prevention to defer exit
 while cleanup runs. Never block the GUI thread during shutdown.
 
-On worker crash or protocol failure, the host invalidates all outstanding
-request IDs and generations, clears pending image data, marks the active tab
-as needing reopen, and starts a fresh worker only after the old child has
-exited. It reopens only the currently selected path; background tabs remain
-metadata. Retry policy must be bounded to avoid crash loops and must surface a
-recoverable error. A hung native call cannot be safely cancelled in place;
-the render timeout below causes the supervisor to terminate the child process.
+On worker crash or protocol failure, the host fails all outstanding request
+channels, clears the active document state on the next supervisor transition,
+and does not reuse the worker. A later user open/retry starts a replacement
+only after the old process is confirmed reaped. Restart attempts are capped
+at three. The current single-document UI requires the user to reopen the
+selected path after a crash; automatic reopen and multiple-tab metadata
+recovery remain unimplemented. A hung native call cannot be safely cancelled
+in place; the render timeout below causes the supervisor to terminate the
+child process.
 
 ## Render timeout and shutdown grace
 

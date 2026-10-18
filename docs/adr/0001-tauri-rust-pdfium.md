@@ -1,7 +1,7 @@
 # ADR 0001: Tauri, Rust, and PDFium
 
-- Status: Accepted for worker-only smoke integration; clean packaged execution
-  and production host/worker integration remain open.
+- Status: Accepted; Milestone 1 host/worker integration is implemented. The
+  8086/7881 compatibility caveat and clean packaged execution remain open.
 - Date: 2026-10-12
 
 ## Context
@@ -99,8 +99,9 @@ resource mapping is
 `src-tauri/resources/pdfium/THIRD_PARTY_NOTICES.txt` →
 `pdfium/THIRD_PARTY_NOTICES.txt`. These mappings are now active in Tauri
 configuration. Resolve the DLL through `BaseDirectory::Resource`; never use
-the process working directory. The host resolver and packaged execution have
-not yet been implemented or tested.
+the process working directory. The host resolver is implemented: development
+uses the host manifest-relative resource and packaged mode uses
+`BaseDirectory::Resource`. Packaged execution has not been verified.
 
 Within the worker, one OS thread owns the PDFium library and at most one
 document; serialize all operations. Host/worker messages use bounded,
@@ -109,11 +110,14 @@ version 1, big-endian fields, 64 KiB control/request payload cap, and a 32 MiB
 encoded-image cap plus at most 4 KiB metadata. WebView render calls return the
 framed image as `tauri::ipc::Response::new(Vec<u8>)` and
 `@tauri-apps/api/core` `invoke()` receives an `ArrayBuffer`; small metadata may
-use JSON events. Never transport large image payloads as JSON. Package a
-The exact worker crate/API/binary tuple, archive and DLL hashes, and local
-dynamic load/open/render/close smoke path have passed. Keep clean-machine
-runtime dependency checks, Tauri resource lookup, packaged loading, and
-installer verification as release gates.
+use JSON events. Never transport large image payloads as JSON. Package the
+selected DLL and its actual notices using the configured resource map. The
+exact worker crate/API/binary tuple, archive and DLL hashes, and local
+dynamic load/open/render/close smoke path have passed. The production worker
+protocol and Tauri host handoff now implement the first end-to-end code path;
+real-window/WebView2 interaction and packaged execution remain verification
+gates. Keep clean-machine runtime dependency checks and installer verification
+as release gates.
 
 Use configurable `render_timeout_ms` (`PDFIUM_RENDER_TIMEOUT_MS`) with a
 provisional 30,000 ms default and validated 1,000–120,000 ms range. Keep the

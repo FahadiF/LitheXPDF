@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Minimal LitheXPDF desktop shell permissions",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "dialog:allow-open"]
 }

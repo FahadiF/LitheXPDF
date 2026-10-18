@@ -1,4 +1,4 @@
 [workspace]
 resolver = "2"
-members = ["src-tauri", "crates/pdfium-worker"]
-default-members = ["src-tauri", "crates/pdfium-worker"]
+members = ["src-tauri", "crates/pdfium-worker", "crates/pdfium-protocol"]
+default-members = ["src-tauri", "crates/pdfium-worker", "crates/pdfium-protocol"]

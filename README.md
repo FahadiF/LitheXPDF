@@ -7,11 +7,13 @@ document lifecycle and rendering.
 
 **Light on memory. Fast through documents.**
 
-This repository contains a minimal Tauri/frontend scaffold and a worker-only
-PDFium diagnostic that opens a fixture and renders a bounded PNG. Production
-worker IPC, the reader UI, tab behavior, and reader features are not
-implemented. The worker does not load PDFium unless called with the explicit
-diagnostic arguments documented in `docs/TESTING.md`.
+Milestone 1 now connects the vanilla UI to an asynchronous Tauri host command,
+the target-triple-named worker sidecar, bounded versioned binary IPC, and a raw
+Tauri `ArrayBuffer` response. The first vertical slice opens one local PDF,
+renders a page, supports previous/next navigation, and closes the active
+document. Multiple tabs, clean-machine packaging, and broad document coverage
+remain future work. The selected PDFium 8086 / `pdfium-render` 0.9.4 /
+`pdfium_7881` pairing remains an acknowledged compatibility limitation.
 
 ## Architecture and policy
 
@@ -62,14 +64,15 @@ The current scaffold follows this layout without a frontend framework:
 ├── src/                         # vanilla TypeScript, HTML, CSS
 ├── index.html
 ├── crates/
-│   └── pdfium-worker/           # separate Rust worker with diagnostic rendering
+│   ├── pdfium-protocol/         # shared bounded host/worker frame codec
+│   └── pdfium-worker/           # separate Rust binary; sole PDFium owner
 ├── src-tauri/
 │   ├── binaries/                # target-triple sidecar staged after build
 │   ├── capabilities/            # minimal Tauri capability
 │   ├── resources/pdfium/        # hash-pinned DLL and its actual release notices
 │   ├── Cargo.toml               # Tauri host package; workspace member
 │   ├── tauri.conf.json          # Tauri CLI marker and bundle configuration
-│   └── src/                     # minimal Tauri host; no PDFium dependency
+│   └── src/                     # async host/supervisor; no PDFium dependency
 ├── scripts/                     # deterministic Windows sidecar staging
 ├── Cargo.toml                   # repository-root Cargo workspace
 ├── Cargo.lock                   # workspace dependency lockfile
@@ -100,9 +103,11 @@ members = ["src-tauri", "crates/pdfium-worker"]
 default-members = ["src-tauri", "crates/pdfium-worker"]
 ```
 
-The 30,000 ms render-timeout default and separate 2,000 ms worker shutdown
-grace remain design targets; no timeout supervision is implemented yet. See
-[Architecture](docs/ARCHITECTURE.md) and [Testing](docs/TESTING.md).
+The provisional render timeout is 30,000 ms (`PDFIUM_RENDER_TIMEOUT_MS`,
+clamped to 1,000–120,000 ms); application shutdown uses a separate 2,000 ms
+grace. Runtime supervision is implemented off the GUI thread. No latency or
+memory improvement is claimed; see [Testing](docs/TESTING.md) for what remains
+unverified.
 
 Worker packaging, binary transport, and the exact PDFium binary/API pairing
 are defined in [Architecture](docs/ARCHITECTURE.md). The current worker-only

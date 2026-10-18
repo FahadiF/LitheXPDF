@@ -1,7 +1,7 @@
 [package]
 name = "pdfium-worker"
 version = "0.1.0"
-description = "LitheXPDF PDFium diagnostic worker"
+description = "LitheXPDF isolated PDFium worker"
 edition = "2021"
 rust-version = "1.90"
 
@@ -10,5 +10,6 @@ name = "pdfium-worker"
 path = "src/main.rs"
 
 [dependencies]
+pdfium-protocol = { path = "../pdfium-protocol" }
 image = { version = "=0.25.10", default-features = false, features = ["png"] }
 pdfium-render = { version = "=0.9.4", default-features = false, features = ["pdfium_7881", "image_025", "thread_safe"] }

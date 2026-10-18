@@ -1,19 +1,16 @@
 # Testing and milestone plan
 
-The Milestone 0 scaffold is in progress. No reader features or PDFium runtime
-integration have been implemented. Each milestone adds a concrete verification
-gate before expanding scope.
+Milestone 0 environment and PDFium compatibility findings below are retained
+as historical evidence. Milestone 1 now implements the first single-document
+host/worker/UI path; its current checks and remaining manual gates are recorded
+at the end of this file. The full reader, tabs, and packaged execution are not
+complete.
 
-The root workspace, minimal Tauri host, explicit worker placeholder, vanilla
-TypeScript shell, and frontend configuration are scaffolded. In the current
-PowerShell session, Rust stable is active (`stable-x86_64-pc-windows-msvc`,
-`rustc`/`cargo` 1.99.0), and `cargo check`, `cargo test`, and the Windows worker
-release build pass after adding the application icon. `pnpm` 11.25.0 and the
-local Tauri CLI are available in this session. A separate earlier Tauri
-development launch failed because `pnpm` was not found in that launch process's
-`PATH`; rerun the launch from an environment that exposes pnpm. No PDFium
-binary has been selected or bundled. See the historical environment snapshot
-and current verification record below.
+The initial scaffold and compatibility history is preserved below. The
+current Rust host does not link PDFium; the separate worker owns all native
+operations. The selected runtime remains PDFium 157.0.8086.0 with
+`pdfium-render =0.9.4` and `pdfium_7881`; this is a verified open/render path
+for tested calls, not full API or clean-machine compatibility.
 
 ## Milestone 0 — environment and compatibility (current scope)
 
@@ -482,10 +479,100 @@ pnpm tauri:build
 
 These commands assume the single repository-root Cargo workspace and root
 package scripts described above. Sidecar staging follows its Cargo build and
-precedes `pnpm tauri:build`. Current Cargo checks, workspace tests, and the
-Windows worker release build pass. An earlier Tauri development launch failed
-because pnpm was not found in that launch process's `PATH`; pnpm is available
-in the current PowerShell session. The sidecar is staged, but verified PDFium
-resources are absent. PDFium loading/rendering and release packaging remain
-unverified; listing commands does not claim otherwise.
+precedes `pnpm tauri:build`. This is the Milestone 0 baseline record; current
+Milestone 1 results follow.
+
+## Milestone 1 implementation update — 2026-10-18
+
+### Automated command results
+
+- `pnpm install --frozen-lockfile` — exit 0; lockfile is current.
+- `pnpm typecheck` — exit 0.
+- `pnpm test` — exit 0; 4 frontend tests pass. An earlier run failed on a
+  cancellation assertion issued before the pending-render cancellation point;
+  the assertion was corrected and the final run passed.
+- `pnpm build` — exit 0; Vite production bundle completed.
+- `cargo check --workspace --all-targets` — exit 0.
+- `cargo test --workspace` — exit 0 before the final fake-process tests; that
+  earlier run passed 28 Rust tests. Final rerun: exit 0, 30 Rust tests passed.
+  Breakdown: host 10, protocol 5, worker unit 5, diagnostic smoke integration
+  5, and persistent protocol integration 5. Host binary and Rust doc-test
+  targets contain zero tests.
+- `cargo check --release -p lithexpdf-host` — exit 0; verifies the
+  release-only `BaseDirectory::Resource` resolver branch compiles.
+- `cargo build --release --target x86_64-pc-windows-msvc -p pdfium-worker` —
+  exit 0.
+- `node scripts/stage-worker-windows.mjs` — exit 0; staged the existing
+  target-triple-named Windows worker.
+- `git diff --check` — exit 0 on the final documentation/code tree.
+- `pnpm tauri dev` — Vite became ready, the Tauri host compiled, and the log
+  reached `Running target\\debug\\lithexpdf-host.exe`. The command was then
+  interrupted with Ctrl+C for cleanup (shell exit 1). This confirms the dev
+  command reached the host launch step; it does not verify that a visible
+  window opened or that WebView2 rendered the frontend.
+
+### Real worker tests
+
+The persistent worker integration tests use the selected PDFium DLL and
+exercise READY, OPEN, RENDER, PAGE, CLOSE, and SHUTDOWN frames. They also cover
+missing-DLL startup failure, a corrupt-PDF error response, rendering the
+second page of a deterministic two-page fixture, and fifty sequential
+open/close document switches in one worker process. These are functional
+checks; they do not measure native leak behavior, process memory, latency, or
+working-set changes.
+
+### Manual and packaging status
+
+The native PDF picker, visible first-page rendering, previous/next UI
+interaction, switching documents, close acknowledgement, invalid-PDF error
+display, WebView2 response handling, and worker exit on app close were not
+manually exercised. The current task environment does not expose the
+`node_repl` entry point required by the installed Computer Use workflow, so no
+window automation or visual inspection was possible. The dev command was
+stopped cleanly after its host launch step. Packaged execution and clean
+Windows-machine dependency checks remain unverified. No memory or performance
+improvement is claimed.
+
+### Remaining Milestone 1 gates
+
+- Complete the manual UI checks above from an interactive Windows session.
+- Test the raw `Response`/`ArrayBuffer` path in WebView2 and verify the page
+  image visually; current automated raw-response parser tests run in Vitest.
+- The Rust host tests use a fake process transport for worker crash
+  termination, render timeout termination, reaping-before-restart ordering,
+  and bounded restart attempts. Real worker integration covers startup error,
+  binary open/render/close, corrupt-PDF errors, and graceful shutdown.
+- Verify a packaged install resolves both the target-triple sidecar and mapped
+  DLL/notices on a clean Windows x64 machine. This remains a release gate.
+
+### Worker-only PDFium integration revalidation — 2026-10-18
+
+The existing worker-only integration was re-run while continuing development.
+`cargo test -p pdfium-worker --all-targets` passed 15 tests: 5 worker unit
+tests and 10 subprocess tests. `cargo check --workspace --all-targets` and
+`cargo test --workspace` both exited 0; the latter passed 30 tests as listed
+above. The release Windows x64 worker build exited 0. The initial sandboxed
+`pnpm build` attempt failed because Vite could not clean the existing `dist`
+directory; rerunning with repository write access exited 0. `pnpm typecheck`
+and `pnpm test` exited 0; Vitest reported 4 frontend tests.
+
+The explicit worker smoke command used the checked-in
+`src-tauri/resources/pdfium/pdfium.dll` and
+`crates/pdfium-worker/tests/fixtures/smoke-one-page.pdf`; it exited 0 and
+reported `pages=1`, `page1_points=200.00x120.00`, `render_px=200x120`, and
+`png_bytes=912`. The locally recomputed DLL SHA-256 was
+`1f2aee4286b8cf0413ab4562b7121aa454f9cfd9afd6ca8609bcef80927b3f80`, matching
+the previously recorded value. The generated PNG was opened and visually
+inspected; it shows the fixture's blue rectangle on a white background.
+`git diff --check` exited 0. These checks re-verify the selected worker path;
+they do not verify broader PDF compatibility, clean-machine packaging, or
+Tauri WebView2 display. The separate API-version compatibility limitation
+remains documented above.
+
+The official release index now lists PDFium `157.0.8100.0` (`chromium/8100`,
+release commit `5b4d6b2`, published 2026-10-12) above `157.0.8086.0`. The
+8100 archive and DLL were not downloaded or tested here, and no hash or
+compatibility claim is made for them. The active `8086` runtime was retained
+for this milestone as requested; evaluate 8100 in a separately reviewed
+compatibility follow-up before changing the pinned artifact.
 

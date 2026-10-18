@@ -3,8 +3,10 @@
 ## Request
 
 Every frontend request identifies a tab and a particular activation of that
-tab. The host assigns a monotonically increasing generation per tab and a
-unique request ID. A request contains:
+tab. The host assigns a monotonically increasing document generation and a
+unique 64-bit worker request ID. The frontend also supplies a random
+cancellation token to `render_page`; it is only a host-side queue cancellation
+key and is not reused as the binary protocol request ID. A request contains:
 
 ```text
 protocol_version
@@ -56,14 +58,19 @@ all other request/reply frames use the originating nonzero request ID.
 generation (u64), page index (u32), zoom as IEEE-754 binary64, width/height
 (u32 each), priority (u8), and three reserved zero bytes. `CLOSE` payload is
 tab ID (16) and generation (u64); `SHUTDOWN` has an empty payload. All
-multi-byte fields use network byte order (big-endian). `READY`, `ACK`, and
-`ERROR` are small fixed/length-checked control payloads; `ERROR` includes a
-stable u16 code and a length-prefixed UTF-8 diagnostic capped at 4 KiB.
+multi-byte fields use network byte order (big-endian). `READY` has an empty
+payload. `ACK` is contextual: OPEN returns tab ID (16), generation (u64), page
+count (u32), and first-page width/height in points (IEEE-754 binary64 each),
+exactly 44 bytes; CLOSE echoes its 24-byte tab ID and generation payload;
+SHUTDOWN returns an empty payload. `ERROR` contains a stable u16 code, UTF-8
+diagnostic length as u16, then diagnostic bytes capped at 4 KiB. ERROR request
+IDs correlate with the command that failed.
 
 Render/open/control requests and non-image responses have a maximum 64 KiB
-payload. A `PAGE` response contains fixed metadata (tab ID as 16 bytes,
-generation as u64, page index/width/height as u32, content type as u16, and
-encoded image length as u32) followed by encoded image bytes. Metadata may not
+payload. A `PAGE` response contains 42 bytes of fixed metadata (tab ID as 16
+bytes, generation as u64, page index/width/height as u32, PNG content type as
+u16 with value `1`, and encoded image length as u32) followed by encoded image
+bytes. Metadata may not
 exceed 4 KiB; encoded image bytes may not exceed 32 MiB. Validate the declared
 frame length against the kind-specific cap before allocating. Read exactly
 the declared payload; pipe chunk boundaries have no protocol meaning. Validate
@@ -88,9 +95,11 @@ metadata may use JSON commands/events. Image payloads must never be returned
 as JSON arrays, base64 strings, or JSON events. This path is documented by
 Tauri and still requires a WebView2 smoke test at the configured size cap.
 
-The host accepts a result only if its request is still registered and the tab
-is still active at the same generation. The frontend repeats the same check
-before displaying it. Any mismatch is stale: discard bytes and release
+The host accepts a result only if its request ID is still registered with the
+expected reply kind and the active document still has the same identity and
+generation. The frontend repeats the identity, generation, page, dimensions,
+PNG signature, frame length, and nonzero request ID checks before displaying
+it. Any mismatch is stale: discard bytes and release
 references immediately. This double-check makes a delayed Tauri response harmless
 after a tab switch or close.
 
@@ -99,9 +108,11 @@ after a tab switch or close.
 The host limits the queue to two pending requests and one in-flight render.
 New active viewport requests supersede queued requests for the same tab/page
 and lower-priority prefetch. Activation, deactivation, close, and worker
-restart increment generation before sending more work. Cancellation removes
-queued work; it does not promise interruption of an active native PDFium call.
-The host may terminate and restart a timed-out worker process.
+restart increment generation before sending more work. `cancel_render` marks
+a queued request token; the command checks it before writing a frame.
+Cancellation cannot interrupt a native call already executing inside PDFium;
+it awaits that response and discards it against the cancellation token and
+generation. The host may terminate a timed-out worker process.
 
 ## Render deadline and shutdown deadline
 

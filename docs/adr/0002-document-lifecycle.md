@@ -3,6 +3,12 @@
 - Status: Accepted
 - Date: 2026-10-12
 
+Milestone 1 implements one active document and deterministic CLOSE/SHUTDOWN
+messages in the worker. The UI does not yet expose background tabs or retain
+tab metadata; the lifecycle below remains the design constraint for later tab
+work. Repeated worker open/close behavior has a 50-cycle functional test, but
+no native-memory or working-set conclusion has been measured.
+
 ## Context
 
 The application targets 30 or more open tabs. Keeping every PDFium document

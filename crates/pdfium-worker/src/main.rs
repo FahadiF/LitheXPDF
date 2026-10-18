@@ -2,10 +2,14 @@
 //! main OS thread; this is not the production IPC loop.
 
 use image::ImageEncoder;
-use pdfium_render::prelude::{PdfRenderConfig, Pdfium};
+use pdfium_protocol::{
+    encode, parse_header, read_u32, read_u64, validate_bitmap, Frame, Kind, MAX_CONTROL_PAYLOAD,
+    MAX_IMAGE_BYTES, OPEN_ACK_LEN,
+};
+use pdfium_render::prelude::{PdfDocument, PdfRenderConfig, Pdfium};
 use std::ffi::OsString;
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -30,13 +34,297 @@ struct RenderReport {
 }
 
 fn main() -> ExitCode {
-    match parse_args(std::env::args_os().skip(1).collect()).and_then(run_smoke_test) {
+    let args = std::env::args_os().skip(1).collect::<Vec<_>>();
+    let result = if args.first().is_some_and(|v| v == "--serve") {
+        parse_server_args(args).and_then(run_server)
+    } else {
+        parse_args(args).and_then(run_smoke_test)
+    };
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("pdfium-worker: {error}");
             ExitCode::FAILURE
         }
     }
+}
+
+fn parse_server_args(args: Vec<OsString>) -> Result<PathBuf, String> {
+    if args.len() != 3 || args[0] != "--serve" || args[1] != "--pdfium-path" {
+        return Err("usage: pdfium-worker --serve --pdfium-path <absolute-pdfium.dll>".into());
+    }
+    let path = PathBuf::from(&args[2]);
+    if !path.is_absolute() {
+        return Err("PDFium DLL path must be absolute".into());
+    }
+    if !path.is_file() {
+        return Err(format!("PDFium DLL does not exist: {}", path.display()));
+    }
+    Ok(path)
+}
+
+fn run_server(pdfium_path: PathBuf) -> Result<(), String> {
+    let bindings = Pdfium::bind_to_library(&pdfium_path)
+        .map_err(|e| format!("could not load PDFium DLL {}: {e}", pdfium_path.display()))?;
+    // The worker owns this library for its whole process lifetime. The leaked
+    // allocation gives PdfDocument its required library lifetime; the OS
+    // reclaims it when the supervised worker exits.
+    let pdfium: &'static Pdfium = Box::leak(Box::new(Pdfium::new(bindings)));
+    let mut session = WorkerSession {
+        pdfium,
+        document: None,
+        identity: None,
+    };
+    write_frame(&Frame {
+        kind: Kind::Ready,
+        request_id: 0,
+        payload: Vec::new(),
+    })?;
+    let stdin = io::stdin();
+    let mut input = stdin.lock();
+    loop {
+        let frame = match read_frame(&mut input) {
+            Ok(Some(frame)) => frame,
+            Ok(None) => break,
+            Err(error) => return Err(format!("protocol input failure: {error}")),
+        };
+        if frame.kind == Kind::Shutdown {
+            if !frame.payload.is_empty() {
+                send_error(frame.request_id, 1, "SHUTDOWN payload must be empty")?;
+                continue;
+            }
+            write_frame(&Frame {
+                kind: Kind::Ack,
+                request_id: frame.request_id,
+                payload: Vec::new(),
+            })?;
+            break;
+        }
+        let result = session.handle(frame.kind, &frame.payload);
+        match result {
+            Ok((kind, payload)) => write_frame(&Frame {
+                kind,
+                request_id: frame.request_id,
+                payload,
+            })?,
+            Err((code, message)) => send_error(frame.request_id, code, &message)?,
+        }
+    }
+    Ok(())
+}
+
+struct WorkerSession {
+    pdfium: &'static Pdfium,
+    document: Option<PdfDocument<'static>>,
+    identity: Option<([u8; 16], u64)>,
+}
+
+impl WorkerSession {
+    fn handle(&mut self, kind: Kind, payload: &[u8]) -> Result<(Kind, Vec<u8>), (u16, String)> {
+        match kind {
+            Kind::Open => self.open(payload),
+            Kind::Render => self.render(payload),
+            Kind::Close => self.close(payload),
+            _ => Err((2, format!("message kind {kind:?} is not a worker request"))),
+        }
+    }
+
+    fn open(&mut self, payload: &[u8]) -> Result<(Kind, Vec<u8>), (u16, String)> {
+        if self.document.is_some() {
+            return Err((3, "a document is already open".into()));
+        }
+        if payload.len() < 28 {
+            return Err((4, "OPEN payload is truncated".into()));
+        }
+        let tab_id: [u8; 16] = payload[..16]
+            .try_into()
+            .map_err(|_| (4, "invalid tab identifier".into()))?;
+        let generation = read_u64(payload, 16).map_err(protocol_err)?;
+        let path_len = read_u32(payload, 24).map_err(protocol_err)? as usize;
+        let expected = 28usize
+            .checked_add(path_len)
+            .ok_or_else(|| (4, "OPEN path length overflow".into()))?;
+        if generation == 0
+            || path_len == 0
+            || path_len > MAX_CONTROL_PAYLOAD - 28
+            || expected != payload.len()
+        {
+            return Err((4, "invalid OPEN identifier or path length".into()));
+        }
+        let path = std::str::from_utf8(&payload[28..])
+            .map_err(|_| (4, "OPEN path is not UTF-8".into()))?;
+        let path = PathBuf::from(path);
+        if !path.is_absolute() {
+            return Err((4, "document path must be absolute".into()));
+        }
+        let document = self
+            .pdfium
+            .load_pdf_from_file(&path, None)
+            .map_err(|e| (5, format!("could not open PDF {}: {e}", path.display())))?;
+        let page_count = u32::try_from(document.pages().len())
+            .map_err(|_| (5, "page count exceeds protocol range".into()))?;
+        if page_count == 0 {
+            return Err((5, "PDF contains no pages".into()));
+        }
+        let (width, height) = {
+            let first = document
+                .pages()
+                .get(0)
+                .map_err(|e| (5, format!("could not read page one: {e}")))?;
+            (first.width().value as f64, first.height().value as f64)
+        };
+        let mut response = Vec::with_capacity(OPEN_ACK_LEN);
+        response.extend_from_slice(&tab_id);
+        response.extend_from_slice(&generation.to_be_bytes());
+        response.extend_from_slice(&page_count.to_be_bytes());
+        response.extend_from_slice(&width.to_be_bytes());
+        response.extend_from_slice(&height.to_be_bytes());
+        self.document = Some(document);
+        self.identity = Some((tab_id, generation));
+        Ok((Kind::Ack, response))
+    }
+
+    fn render(&mut self, payload: &[u8]) -> Result<(Kind, Vec<u8>), (u16, String)> {
+        if payload.len() != 48 {
+            return Err((4, "RENDER payload must be 48 bytes".into()));
+        }
+        let tab_id: [u8; 16] = payload[..16]
+            .try_into()
+            .map_err(|_| (4, "invalid tab identifier".into()))?;
+        let generation = read_u64(payload, 16).map_err(protocol_err)?;
+        let page_index = read_u32(payload, 24).map_err(protocol_err)?;
+        let zoom = f64::from_be_bytes(
+            payload[28..36]
+                .try_into()
+                .map_err(|_| (4, "invalid zoom".into()))?,
+        );
+        let target_width = read_u32(payload, 36).map_err(protocol_err)?;
+        let target_height = read_u32(payload, 40).map_err(protocol_err)?;
+        if payload[45..48] != [0, 0, 0] || payload[44] > 1 {
+            return Err((4, "invalid RENDER priority or reserved bytes".into()));
+        }
+        if !zoom.is_finite() || !(0.25..=5.0).contains(&zoom) {
+            return Err((4, "zoom must be between 0.25 and 5.0".into()));
+        }
+        let width = ((f64::from(target_width) * zoom).round()).clamp(1.0, 8192.0) as u32;
+        let height = ((f64::from(target_height) * zoom).round()).clamp(1.0, 8192.0) as u32;
+        validate_bitmap(width, height).map_err(protocol_err)?;
+        if self.identity != Some((tab_id, generation)) {
+            return Err((
+                6,
+                "render does not match the active document generation".into(),
+            ));
+        }
+        let document = self
+            .document
+            .as_ref()
+            .ok_or_else(|| (6, "no document is open".into()))?;
+        if page_index >= document.pages().len() as u32 || page_index > i32::MAX as u32 {
+            return Err((4, "page index is out of range".into()));
+        }
+        let page = document
+            .pages()
+            .get(page_index as i32)
+            .map_err(|e| (7, format!("could not open page: {e}")))?;
+        let page = page
+            .render_with_config(
+                &PdfRenderConfig::new()
+                    .set_target_size(width as i32, height as i32)
+                    .set_maximum_width(8192)
+                    .set_maximum_height(8192),
+            )
+            .map_err(|e| (7, format!("could not render page: {e}")))?;
+        let actual_width = page.width() as u32;
+        let actual_height = page.height() as u32;
+        validate_bitmap(actual_width, actual_height).map_err(protocol_err)?;
+        let rgba = page.as_rgba_bytes();
+        let mut png = BoundedVec::new(MAX_IMAGE_BYTES);
+        image::codecs::png::PngEncoder::new(&mut png)
+            .write_image(
+                &rgba,
+                actual_width,
+                actual_height,
+                image::ExtendedColorType::Rgba8,
+            )
+            .map_err(|e| (8, format!("IMAGE_TOO_LARGE or PNG encode failure: {e}")))?;
+        if png.bytes.is_empty() {
+            return Err((8, "PNG encoder produced no image".into()));
+        }
+        let mut response = Vec::with_capacity(42 + png.bytes.len());
+        response.extend_from_slice(&tab_id);
+        response.extend_from_slice(&generation.to_be_bytes());
+        response.extend_from_slice(&page_index.to_be_bytes());
+        response.extend_from_slice(&actual_width.to_be_bytes());
+        response.extend_from_slice(&actual_height.to_be_bytes());
+        response.extend_from_slice(&1u16.to_be_bytes()); // content type: PNG
+        response.extend_from_slice(&(png.bytes.len() as u32).to_be_bytes());
+        response.extend_from_slice(&png.bytes);
+        Ok((Kind::Page, response))
+    }
+
+    fn close(&mut self, payload: &[u8]) -> Result<(Kind, Vec<u8>), (u16, String)> {
+        if payload.len() != 24 {
+            return Err((4, "CLOSE payload must be 24 bytes".into()));
+        }
+        let tab_id: [u8; 16] = payload[..16]
+            .try_into()
+            .map_err(|_| (4, "invalid tab identifier".into()))?;
+        let generation = read_u64(payload, 16).map_err(protocol_err)?;
+        if self.identity != Some((tab_id, generation)) {
+            return Err((
+                6,
+                "close does not match the active document generation".into(),
+            ));
+        }
+        self.document.take();
+        self.identity = None;
+        Ok((Kind::Ack, payload.to_vec()))
+    }
+}
+
+fn protocol_err(error: pdfium_protocol::ProtocolError) -> (u16, String) {
+    (4, error.to_string())
+}
+
+fn read_frame(input: &mut impl Read) -> io::Result<Option<Frame>> {
+    let mut header_bytes = [0u8; pdfium_protocol::HEADER_LEN];
+    let first = input.read(&mut header_bytes[..1])?;
+    if first == 0 {
+        return Ok(None);
+    }
+    input.read_exact(&mut header_bytes[1..])?;
+    let header =
+        parse_header(&header_bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    let mut payload = vec![0; header.payload_len];
+    input.read_exact(&mut payload)?;
+    Ok(Some(Frame {
+        kind: header.kind,
+        request_id: header.request_id,
+        payload,
+    }))
+}
+
+fn write_frame(frame: &Frame) -> Result<(), String> {
+    let bytes = encode(frame).map_err(|e| e.to_string())?;
+    let stdout = io::stdout();
+    let mut out = stdout.lock();
+    out.write_all(&bytes)
+        .and_then(|_| out.flush())
+        .map_err(|e| format!("could not write protocol frame: {e}"))
+}
+
+fn send_error(request_id: u64, code: u16, message: &str) -> Result<(), String> {
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&code.to_be_bytes());
+    let text = message.as_bytes();
+    let text = &text[..text.len().min(4096)];
+    payload.extend_from_slice(&(text.len() as u16).to_be_bytes());
+    payload.extend_from_slice(text);
+    write_frame(&Frame {
+        kind: Kind::Error,
+        request_id,
+        payload,
+    })
 }
 
 fn parse_args(args: Vec<OsString>) -> Result<Args, String> {

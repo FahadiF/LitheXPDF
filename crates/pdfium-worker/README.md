@@ -1,8 +1,10 @@
 # PDFium worker
 
-The worker owns the only PDFium dependency. Its current executable exposes a
-diagnostic path for a real load/open/render/close proof; it is not yet the
-production framed IPC loop and is not yet launched by the Tauri host.
+The worker owns the only PDFium dependency and runs either the diagnostic
+smoke path or the version-1 `PDFW` framed stdio server. In server mode the
+main OS thread binds PDFium, emits `READY`, and serially handles OPEN, RENDER,
+CLOSE, and SHUTDOWN requests. The Tauri host launches this executable as its
+sidecar and reads raw stdout bytes.
 
 The worker manifest pins `pdfium-render =0.9.4` with default features disabled
 and explicitly enables `pdfium_7881`, `image_025`, and `thread_safe`. A direct
@@ -22,3 +24,7 @@ The smoke path does not search the working directory or system DLL locations.
 It bounds output dimensions, pixels, RGBA bytes, and encoded PNG bytes. The
 selected runtime's exact hashes, notice inventory, native imports, tests, and
 remaining packaging limits are recorded in `docs/TESTING.md`.
+
+The supervised server mode accepts `--serve --pdfium-path <absolute-path>`
+and reads binary frames from stdin, writing binary frames to stdout. Diagnostics
+go to stderr. Do not write log text to stdout in server mode.

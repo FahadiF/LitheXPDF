@@ -7,16 +7,30 @@
     <title>LitheXPDF</title>
   </head>
   <body>
-    <main class="shell" aria-labelledby="app-title">
-      <header class="brand">
-        <p class="eyebrow">WINDOWS PDF READER</p>
-        <h1 id="app-title">LitheXPDF</h1>
-        <p class="tagline">Light on memory. Fast through documents.</p>
+    <main class="app-shell" aria-labelledby="app-title">
+      <header class="topbar">
+        <div class="brand-lockup"><span class="brand-icon" aria-hidden="true">PDF</span><div><p class="eyebrow">LITHEXPDF READER</p><h1 id="app-title">LitheXPDF</h1></div></div>
+        <div class="toolbar">
+          <button id="open-button" class="button button-primary" type="button">Open PDF</button>
+          <button id="close-button" class="button" type="button" disabled>Close</button>
+          <span class="toolbar-divider" aria-hidden="true"></span>
+          <button id="previous-button" class="button button-square" type="button" aria-label="Previous page" disabled>‹</button>
+          <span id="page-counter" class="page-counter">— / —</span>
+          <button id="next-button" class="button button-square" type="button" aria-label="Next page" disabled>›</button>
+        </div>
       </header>
-      <section class="status" aria-live="polite">
-        <span class="status-mark" aria-hidden="true"></span>
-        <p id="scaffold-status">Desktop shell scaffold. PDF rendering is not implemented.</p>
+      <section class="document-bar">
+        <span class="document-mark" aria-hidden="true"></span>
+        <p id="document-name">No document open</p>
+        <p id="status-text" role="status" aria-live="polite">Choose a PDF to begin.</p>
       </section>
+      <section id="viewer" class="viewer" aria-label="PDF page">
+        <div id="empty-state" class="empty-state"><span class="empty-icon" aria-hidden="true">▤</span><h2>Open a document</h2><p>Select a local PDF to view its pages.</p></div>
+        <div id="loading-state" class="loading-state" hidden><span class="spinner" aria-hidden="true"></span><span>Rendering page…</span></div>
+        <img id="page-image" alt="PDF page" hidden />
+        <div id="error-state" class="error-state" role="alert" hidden></div>
+      </section>
+      <footer class="footer"><span>One active PDFium document</span><span id="page-size"></span></footer>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>

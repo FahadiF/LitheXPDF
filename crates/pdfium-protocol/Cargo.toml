@@ -1,0 +1,9 @@
+[package]
+name = "pdfium-protocol"
+version = "0.1.0"
+description = "Bounded LitheXPDF host-worker binary protocol"
+edition = "2021"
+rust-version = "1.90"
+
+[lib]
+path = "src/lib.rs"
