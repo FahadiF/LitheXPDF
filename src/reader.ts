@@ -23,6 +23,7 @@ const RENDER_MODE_STORAGE_KEY = "lithexpdf.renderMode.v2";
 const APP_VERSION = "0.1.0";
 
 type RenderMode = "current" | "nearby" | "balanced" | "maximum";
+type PageRotation = 0 | 90 | 180 | 270;
 
 interface ReaderTab {
   id: string;
@@ -30,6 +31,7 @@ interface ReaderTab {
   name: string;
   pageIndex: number;
   zoom: number;
+  rotation: PageRotation;
   scrollTop: number;
   scrollLeft: number;
 }
@@ -145,11 +147,14 @@ export class PdfReaderUi {
   private readonly recentList: HTMLElement | null;
   private readonly zoomInButton: HTMLButtonElement | null;
   private readonly zoomOutButton: HTMLButtonElement | null;
+  private readonly rotateLeftButton: HTMLButtonElement | null;
+  private readonly rotateRightButton: HTMLButtonElement | null;
   private readonly zoomLevel: HTMLElement | null;
   private readonly printButton: HTMLButtonElement | null;
   private readonly tabs: ReaderTab[] = [];
   private activeTabId?: string;
   private zoom = 1;
+  private rotation: PageRotation = 0;
   private renderMode: RenderMode = readRenderMode();
   private recentPaths = readRecentPaths();
   private pageSlots: HTMLElement[] = [];
@@ -214,6 +219,8 @@ export class PdfReaderUi {
     this.recentList = this.optional("#recent-list");
     this.zoomInButton = this.optional<HTMLButtonElement>("#zoom-in-button");
     this.zoomOutButton = this.optional<HTMLButtonElement>("#zoom-out-button");
+    this.rotateLeftButton = this.optional<HTMLButtonElement>("#rotate-left-button");
+    this.rotateRightButton = this.optional<HTMLButtonElement>("#rotate-right-button");
     this.zoomLevel = this.optional("#zoom-level");
     this.printButton = this.optional<HTMLButtonElement>("#print-button");
     const versionElement = this.optional("#app-version");
@@ -223,6 +230,8 @@ export class PdfReaderUi {
     this.newTabButton?.addEventListener("click", () => void this.openPicker());
     this.zoomInButton?.addEventListener("click", () => this.changeZoom(0.1));
     this.zoomOutButton?.addEventListener("click", () => this.changeZoom(-0.1));
+    this.rotateLeftButton?.addEventListener("click", () => this.rotateCurrentView(-90));
+    this.rotateRightButton?.addEventListener("click", () => this.rotateCurrentView(90));
     this.printButton?.addEventListener("click", () => this.printCurrentPage());
     this.menuButton?.addEventListener("click", () => this.setMenuOpen(this.menuPanel?.hidden ?? true));
     this.recentMenuWrap?.addEventListener("pointerenter", () => this.setRecentMenuOpen(true));
@@ -245,6 +254,8 @@ export class PdfReaderUi {
     this.optional<HTMLButtonElement>("#menu-new")?.addEventListener("click", () => { this.setMenuOpen(false); void this.openPicker(); });
     this.optional<HTMLButtonElement>("#menu-zoom-in")?.addEventListener("click", () => { this.setMenuOpen(false); this.changeZoom(0.1); });
     this.optional<HTMLButtonElement>("#menu-zoom-out")?.addEventListener("click", () => { this.setMenuOpen(false); this.changeZoom(-0.1); });
+    this.optional<HTMLButtonElement>("#menu-rotate-left")?.addEventListener("click", () => { this.setMenuOpen(false); this.rotateCurrentView(-90); });
+    this.optional<HTMLButtonElement>("#menu-rotate-right")?.addEventListener("click", () => { this.setMenuOpen(false); this.rotateCurrentView(90); });
     this.optional<HTMLButtonElement>("#menu-print")?.addEventListener("click", () => { this.setMenuOpen(false); this.printCurrentPage(); });
     this.optional<HTMLButtonElement>("#menu-settings")?.addEventListener("click", () => { this.setMenuOpen(false); this.showDialog("#settings-dialog"); });
     this.optional<HTMLButtonElement>("#menu-about")?.addEventListener("click", () => { this.setMenuOpen(false); this.showDialog("#about-dialog"); });
@@ -350,6 +361,7 @@ export class PdfReaderUi {
     if (!tab) return;
     tab.pageIndex = this.pageIndex;
     tab.zoom = this.zoom;
+    tab.rotation = this.rotation;
     tab.scrollTop = this.viewer.scrollTop;
     tab.scrollLeft = this.viewer.scrollLeft;
   }
@@ -420,9 +432,29 @@ export class PdfReaderUi {
   }
 
   private handleKeyboardShortcuts(event: KeyboardEvent): void {
+    const target = event.target;
+    const isEditing = target instanceof HTMLElement
+      && (target.isContentEditable || target.matches("input, textarea, select"));
+    if (event.key === "F1") {
+      event.preventDefault();
+      this.showDialog("#help-dialog");
+      return;
+    }
+    if (!(event.ctrlKey || event.metaKey) && !event.altKey && !isEditing) {
+      if (event.key === "ArrowLeft" && this.current) {
+        event.preventDefault();
+        this.navigateToPage(this.pageIndex - 1);
+      } else if (event.key === "ArrowRight" && this.current) {
+        event.preventDefault();
+        this.navigateToPage(this.pageIndex + 1);
+      }
+      return;
+    }
     if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
     const key = event.key.toLowerCase();
     if (key === "o") { event.preventDefault(); void this.openPicker(); }
+    else if (key === "t") { event.preventDefault(); void this.openPicker(); }
+    else if (key === "w") { event.preventDefault(); void this.close(); }
     else if (key === "p") { event.preventDefault(); this.printCurrentPage(); }
     else if (key === "+" || key === "=") { event.preventDefault(); this.changeZoom(0.1); }
     else if (key === "-") { event.preventDefault(); this.changeZoom(-0.1); }
@@ -456,6 +488,63 @@ export class PdfReaderUi {
       this.viewer.scrollTop = top;
       this.viewer.scrollLeft = left;
     });
+  }
+
+  private rotateCurrentView(delta: -90 | 90): void {
+    if (!this.current) return;
+    const slot = this.pageSlots[this.pageIndex];
+    const beforeTop = slot ? slot.getBoundingClientRect().top - this.viewer.getBoundingClientRect().top + this.viewer.scrollTop : 0;
+    const beforeHeight = slot?.offsetHeight ?? 0;
+    const pageScrollFraction = beforeHeight > 0
+      ? Math.max(0, Math.min(1, (this.viewer.scrollTop - beforeTop) / beforeHeight))
+      : 0;
+    this.rotation = normalizeRotation(this.rotation + delta);
+    this.saveActiveTabState();
+    this.applyRotationToSlots();
+    this.appDocument().defaultView?.requestAnimationFrame(() => {
+      if (slot && this.pageSlots[this.pageIndex] === slot) {
+        const top = slot.getBoundingClientRect().top - this.viewer.getBoundingClientRect().top + this.viewer.scrollTop;
+        this.viewer.scrollTop = top + pageScrollFraction * slot.offsetHeight;
+      }
+      this.saveActiveTabState();
+    });
+  }
+
+  private applyRotationToSlots(): void {
+    for (const slot of this.pageSlots) {
+      const width = Number(slot.dataset.pageWidth);
+      const height = Number(slot.dataset.pageHeight);
+      if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) continue;
+      slot.style.aspectRatio = this.rotation % 180 === 0 ? `${width} / ${height}` : `${height} / ${width}`;
+    }
+    if (this.renderedPageIndex !== undefined) this.applyImageRotation(this.renderedPageIndex);
+  }
+
+  private applyImageRotation(pageIndex: number): void {
+    const slot = this.pageSlots[pageIndex];
+    if (!slot) return;
+    const width = Number(slot.dataset.pageWidth);
+    const height = Number(slot.dataset.pageHeight);
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return;
+    if (this.rotation === 0) {
+      this.image.style.position = "";
+      this.image.style.left = "";
+      this.image.style.top = "";
+      this.image.style.width = "";
+      this.image.style.height = "";
+      this.image.style.maxWidth = "";
+      this.image.style.maxHeight = "";
+      this.image.style.transform = "";
+      return;
+    }
+    this.image.style.position = "absolute";
+    this.image.style.left = "50%";
+    this.image.style.top = "50%";
+    this.image.style.maxWidth = "none";
+    this.image.style.maxHeight = "none";
+    this.image.style.width = this.rotation % 180 === 0 ? "100%" : `${(100 * width) / height}%`;
+    this.image.style.height = this.rotation % 180 === 0 ? "auto" : `${(100 * height) / width}%`;
+    this.image.style.transform = `translate(-50%, -50%) rotate(${this.rotation}deg)`;
   }
 
   private printCurrentPage(): void {
@@ -550,6 +639,7 @@ export class PdfReaderUi {
       name: path.split(/[\\/]/).at(-1) ?? path,
       pageIndex: 0,
       zoom: 1,
+      rotation: 0,
       scrollTop: 0,
       scrollLeft: 0,
     };
@@ -579,6 +669,7 @@ export class PdfReaderUi {
     this.setBookmarksPanel(false);
     this.pageIndex = tab.pageIndex;
     this.zoom = clampZoom(tab.zoom);
+    this.rotation = normalizeRotation(tab.rotation);
     this.prefetchCursor = this.pageIndex + 1;
     this.pageSlots = [];
     this.pageNumber.value = "";
@@ -638,6 +729,7 @@ export class PdfReaderUi {
       this.renderBookmarks();
       this.name.textContent = tab.name;
       this.createPageSlots(result);
+      this.applyRotationToSlots();
       this.applyZoom();
       this.viewer.scrollTop = tab.scrollTop;
       this.viewer.scrollLeft = tab.scrollLeft;
@@ -670,6 +762,8 @@ export class PdfReaderUi {
       slot.className = "page-slot";
       slot.dataset.pageIndex = String(index);
       slot.setAttribute("aria-label", `Page ${index + 1}`);
+      slot.dataset.pageWidth = String(doc.page_width_points);
+      slot.dataset.pageHeight = String(doc.page_height_points);
       slot.style.aspectRatio = `${doc.page_width_points} / ${doc.page_height_points}`;
       return slot;
     });
@@ -977,7 +1071,11 @@ export class PdfReaderUi {
 
       const imageBuffer = parsed.png.slice().buffer as ArrayBuffer;
       const slot = this.pageSlots[index];
-      slot.style.aspectRatio = parsed.width + " / " + parsed.height;
+      slot.dataset.pageWidth = String(parsed.width);
+      slot.dataset.pageHeight = String(parsed.height);
+      slot.style.aspectRatio = this.rotation % 180 === 0
+        ? `${parsed.width} / ${parsed.height}`
+        : `${parsed.height} / ${parsed.width}`;
       this.clearImage();
       this.objectUrl = (this.bridge.createObjectURL ?? URL.createObjectURL.bind(URL))(
         new Blob([imageBuffer], { type: "image/png" }),
@@ -999,6 +1097,7 @@ export class PdfReaderUi {
         }
       };
       slot.append(this.image);
+      this.applyImageRotation(index);
       this.image.hidden = true;
       this.image.src = this.objectUrl;
       this.scheduleNextPagePrefetch(index, doc, generationToken, !opening);
@@ -1188,6 +1287,14 @@ export class PdfReaderUi {
     this.image.onerror = null;
     this.image.removeAttribute("src");
     this.image.hidden = true;
+    this.image.style.position = "";
+    this.image.style.left = "";
+    this.image.style.top = "";
+    this.image.style.width = "";
+    this.image.style.height = "";
+    this.image.style.maxWidth = "";
+    this.image.style.maxHeight = "";
+    this.image.style.transform = "";
     if (this.objectUrl) { (this.bridge.revokeObjectURL ?? URL.revokeObjectURL.bind(URL))(this.objectUrl); this.objectUrl = undefined; }
   }
 
@@ -1209,6 +1316,12 @@ export class PdfReaderUi {
     this.closeButton.disabled = !doc;
     if (this.zoomInButton) this.zoomInButton.disabled = !doc || this.zoom >= 4;
     if (this.zoomOutButton) this.zoomOutButton.disabled = !doc || this.zoom <= 0.25;
+    if (this.rotateLeftButton) this.rotateLeftButton.disabled = !doc;
+    if (this.rotateRightButton) this.rotateRightButton.disabled = !doc;
+    const menuRotateLeft = this.optional<HTMLButtonElement>("#menu-rotate-left");
+    const menuRotateRight = this.optional<HTMLButtonElement>("#menu-rotate-right");
+    if (menuRotateLeft) menuRotateLeft.disabled = !doc;
+    if (menuRotateRight) menuRotateRight.disabled = !doc;
     if (this.printButton) this.printButton.disabled = !doc || this.renderedPageIndex !== this.pageIndex;
     this.previousButton.disabled = !doc || this.pageIndex <= 0;
     this.nextButton.disabled = !doc || this.pageIndex >= doc.page_count - 1;
@@ -1232,6 +1345,11 @@ export class PdfReaderUi {
 
 function normalizeLocalPath(path: string): string {
   return path.toLowerCase().replaceAll("/", String.fromCharCode(92));
+}
+
+function normalizeRotation(value: number): PageRotation {
+  const normalized = ((Math.round(value / 90) * 90) % 360 + 360) % 360;
+  return normalized as PageRotation;
 }
 
 function clampZoom(value: number): number {

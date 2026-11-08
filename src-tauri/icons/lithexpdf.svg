@@ -1,10 +1,94 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#10243A"/>
-  <path d="M151 76h150l86 86v272H151c-19 0-34-15-34-34V110c0-19 15-34 34-34Z" fill="#F7F5EF"/>
-  <path d="M301 76v66c0 11 9 20 20 20h66" fill="#D9E2E8"/>
-  <path d="M301 76v66c0 11 9 20 20 20h66" fill="none" stroke="#10243A" stroke-linejoin="round" stroke-width="12"/>
-  <path d="M117 239h270v89H117z" fill="#E44C48"/>
-  <path d="M154 265h23c18 0 28 10 28 26s-10 26-28 26h-7v17h-16v-69Zm23 38c8 0 12-4 12-12s-4-12-12-12h-7v24h7Zm40-38h24c22 0 36 13 36 34s-14 35-36 35h-24v-69Zm23 55c13 0 21-7 21-21 0-13-8-20-21-20h-7v41h7Zm48-55h47v14h-31v15h27v14h-27v26h-16v-69Z" fill="#FFFFFF"/>
-  <path d="M172 370h164" stroke="#397A95" stroke-linecap="round" stroke-width="16"/>
-  <path d="M172 407h119" stroke="#397A95" stroke-linecap="round" stroke-width="16" opacity=".72"/>
+  <defs>
+    <!-- Background dark carbon gradient -->
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0c1014"/>
+      <stop offset="50%" stop-color="#12171d"/>
+      <stop offset="100%" stop-color="#080b0e"/>
+    </linearGradient>
+
+    <!-- Neon red border glow -->
+    <linearGradient id="border-glow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ff1e56" stop-opacity="0.8"/>
+      <stop offset="50%" stop-color="#ff0844" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#ff3b6f" stop-opacity="0.7"/>
+    </linearGradient>
+
+    <!-- Document paper gradient -->
+    <linearGradient id="paper" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="70%" stop-color="#f8fafc"/>
+      <stop offset="100%" stop-color="#e2e8f0"/>
+    </linearGradient>
+
+    <!-- Fold gradient -->
+    <linearGradient id="fold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#cbd5e1"/>
+      <stop offset="100%" stop-color="#94a3b8"/>
+    </linearGradient>
+
+    <!-- Main lightning gradient -->
+    <linearGradient id="lightning" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ff3366"/>
+      <stop offset="35%" stop-color="#ff0844"/>
+      <stop offset="70%" stop-color="#ff1e56"/>
+      <stop offset="100%" stop-color="#d60036"/>
+    </linearGradient>
+
+    <!-- Lightning inner core gradient -->
+    <linearGradient id="lightning-core" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="50%" stop-color="#fff0f3"/>
+      <stop offset="100%" stop-color="#ffd1dc"/>
+    </linearGradient>
+
+    <!-- Radial neon glow -->
+    <radialGradient id="neon-glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ff1e56" stop-opacity="0.45"/>
+      <stop offset="60%" stop-color="#ff0844" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#ff1e56" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- App icon squircle background -->
+  <rect width="512" height="512" rx="116" fill="url(#bg)"/>
+  <rect x="3" y="3" width="506" height="506" rx="113" fill="none" stroke="url(#border-glow)" stroke-width="3.5" opacity="0.65"/>
+
+  <!-- Neon ambient glow aura -->
+  <circle cx="260" cy="260" r="190" fill="url(#neon-glow)"/>
+
+  <!-- Document drop shadow -->
+  <path d="M 152 78 L 322 78 L 402 158 L 402 422 C 402 438 389 450 373 450 L 152 450 C 136 450 123 438 123 422 L 123 106 C 123 90 136 78 152 78 Z" fill="#000000" opacity="0.5" transform="translate(4, 8)"/>
+
+  <!-- Document sheet -->
+  <path d="M 152 78 L 322 78 L 402 158 L 402 422 C 402 438 389 450 373 450 L 152 450 C 136 450 123 438 123 422 L 123 106 C 123 90 136 78 152 78 Z" fill="url(#paper)"/>
+
+  <!-- Folded corner shadow & flap -->
+  <path d="M 322 78 L 322 144 C 322 152 328 158 336 158 L 402 158 Z" fill="#000000" opacity="0.18" transform="translate(-2, 3)"/>
+  <path d="M 322 78 L 322 144 C 322 152 328 158 336 158 L 402 158 Z" fill="url(#fold)"/>
+  <path d="M 322 78 L 402 158" stroke="#94a3b8" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Document decorative content lines -->
+  <line x1="162" y1="184" x2="250" y2="184" stroke="#ff1e56" stroke-width="11" stroke-linecap="round" opacity="0.9"/>
+  <line x1="162" y1="216" x2="222" y2="216" stroke="#94a3b8" stroke-width="9" stroke-linecap="round" opacity="0.75"/>
+  <line x1="162" y1="358" x2="362" y2="358" stroke="#cbd5e1" stroke-width="8" stroke-linecap="round" opacity="0.8"/>
+  <line x1="162" y1="388" x2="260" y2="388" stroke="#e2e8f0" stroke-width="8" stroke-linecap="round"/>
+
+  <!-- Speed aura shadow behind lightning -->
+  <path d="M 306 88 L 194 274 L 274 274 L 186 444 L 338 238 L 260 238 Z" fill="#ff1e56" opacity="0.32" transform="scale(1.06) translate(-14, -12)"/>
+
+  <!-- The Neon Lightning Bolt (Main body) -->
+  <path d="M 306 88 L 194 274 L 274 274 L 186 444 L 338 238 L 260 238 Z" fill="url(#lightning)"/>
+
+  <!-- Inner white-hot neon electric core -->
+  <path d="M 300 114 L 210 264 L 266 264 L 206 398 L 316 248 L 262 248 Z" fill="url(#lightning-core)" opacity="0.95"/>
+
+  <!-- Top highlight on lightning edge -->
+  <path d="M 306 88 L 260 238 L 338 238 Z" fill="#ffffff" opacity="0.3"/>
+
+  <!-- PDF badge at bottom-right of sheet -->
+  <g transform="translate(268, 386)">
+    <rect width="102" height="36" rx="7" fill="#ff1e56"/>
+    <text x="51" y="24" font-family="'Segoe UI', system-ui, -apple-system, sans-serif" font-weight="900" font-size="18" fill="#ffffff" text-anchor="middle" letter-spacing="3.5">PDF</text>
+  </g>
 </svg>

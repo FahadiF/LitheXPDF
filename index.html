@@ -3,66 +3,200 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#15191d" />
-    <title>LitheXPDF</title>
+    <meta name="theme-color" content="#0c1014" />
+    <title>LitheXPDF — Desktop PDF Reader</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230c1014'/%3E%3Cpath d='M8 4h10l6 6v18H8z' fill='%23ffffff'/%3E%3Cpath d='M18 4v6h6' fill='%23cbd5e1'/%3E%3Cpath d='M19 6l-8 11h6l-7 11 11-13h-6z' fill='%23ff1e56'/%3E%3C/svg%3E" />
   </head>
   <body>
     <main class="app-shell" aria-labelledby="app-title">
       <header class="topbar">
         <div class="topbar-leading">
           <div class="menu-wrap">
-            <button id="menu-button" class="button menu-button" type="button" aria-label="Open main menu" aria-expanded="false" aria-controls="menu-panel" title="Menu"><span aria-hidden="true">☰</span><span>Menu</span></button>
+            <button id="menu-button" class="button menu-button" type="button" aria-label="Open main menu" aria-expanded="false" aria-controls="menu-panel" title="Menu">
+              <span class="menu-hamburger" aria-hidden="true">
+                <svg width="15" height="13" viewBox="0 0 15 13" fill="currentColor">
+                  <rect width="15" height="2" rx="1"/>
+                  <rect y="5.5" width="15" height="2" rx="1"/>
+                  <rect y="11" width="15" height="2" rx="1"/>
+                </svg>
+              </span>
+              <span>Menu</span>
+            </button>
             <div id="menu-panel" class="menu-panel" role="menu" hidden>
-              <button id="menu-open" class="menu-item" type="button" role="menuitem">Open PDF…</button>
-              <button id="menu-new" class="menu-item" type="button" role="menuitem">New tab…</button>
+              <div class="menu-section-title">Document</div>
+              <button id="menu-open" class="menu-item" type="button" role="menuitem">
+                <span class="menu-icon" aria-hidden="true">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                </span>
+                <span class="menu-label">Open PDF…</span>
+                <kbd class="menu-shortcut">Ctrl+O</kbd>
+              </button>
+              <button id="menu-new" class="menu-item" type="button" role="menuitem">
+                <span class="menu-icon" aria-hidden="true">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                </span>
+                <span class="menu-label">New tab…</span>
+                <kbd class="menu-shortcut">Ctrl+T</kbd>
+              </button>
               <div class="recent-menu-wrap">
-                <button id="recent-trigger" class="menu-item recent-trigger" type="button" role="menuitem" aria-expanded="false" aria-controls="recent-submenu"><span>Recent documents</span><span class="submenu-arrow" aria-hidden="true">›</span></button>
+                <button id="recent-trigger" class="menu-item recent-trigger" type="button" role="menuitem" aria-expanded="false" aria-controls="recent-submenu">
+                  <span class="menu-icon" aria-hidden="true">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                  </span>
+                  <span class="menu-label">Recent documents</span>
+                  <span class="submenu-arrow" aria-hidden="true">›</span>
+                </button>
                 <div id="recent-submenu" class="recent-submenu" role="menu" hidden>
-                  <button id="clear-recent" class="menu-item" type="button" role="menuitem">Clear recent</button>
+                  <button id="clear-recent" class="menu-item" type="button" role="menuitem">
+                    <span class="menu-icon" aria-hidden="true">✕</span>
+                    <span class="menu-label">Clear recent</span>
+                  </button>
                   <div class="menu-separator" role="separator"></div>
                   <div id="recent-list" class="recent-list"><p class="recent-empty">No recent PDFs</p></div>
                 </div>
               </div>
+
               <div class="menu-separator" role="separator"></div>
-              <button id="menu-zoom-in" class="menu-item" type="button" role="menuitem">Zoom in</button>
-              <button id="menu-zoom-out" class="menu-item" type="button" role="menuitem">Zoom out</button>
-              <button id="menu-print" class="menu-item" type="button" role="menuitem">Print current page…</button>
+              <div class="menu-section-title">View</div>
+
+              <button id="menu-zoom-in" class="menu-item" type="button" role="menuitem">
+                <span class="menu-icon" aria-hidden="true">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>
+                </span>
+                <span class="menu-label">Zoom in</span>
+                <kbd class="menu-shortcut">Ctrl++</kbd>
+              </button>
+              <button id="menu-zoom-out" class="menu-item" type="button" role="menuitem">
+                <span class="menu-icon" aria-hidden="true">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>
+                </span>
+                <span class="menu-label">Zoom out</span>
+                <kbd class="menu-shortcut">Ctrl+-</kbd>
+              </button>
+              <button id="menu-rotate-left" class="menu-item" type="button" role="menuitem">
+                <span class="menu-icon" aria-hidden="true">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 2.6-6.4L3 8"></path><path d="M3 3v5h5"></path></svg>
+                </span>
+                <span class="menu-label">Rotate left</span>
+              </button>
+              <button id="menu-rotate-right" class="menu-item" type="button" role="menuitem">
+                <span class="menu-icon" aria-hidden="true">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4L21 8"></path><path d="M21 3v5h-5"></path></svg>
+                </span>
+                <span class="menu-label">Rotate right</span>
+              </button>
+              <button id="menu-print" class="menu-item" type="button" role="menuitem">
+                <span class="menu-icon" aria-hidden="true">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+                </span>
+                <span class="menu-label">Print current page…</span>
+                <kbd class="menu-shortcut">Ctrl+P</kbd>
+              </button>
+
               <div class="menu-separator" role="separator"></div>
-              <button id="menu-settings" class="menu-item" type="button" role="menuitem">Options</button>
-              <button id="menu-help" class="menu-item" type="button" role="menuitem">Help</button>
-              <button id="menu-about" class="menu-item" type="button" role="menuitem">About LitheXPDF</button>
+              <div class="menu-section-title">System</div>
+
+              <button id="menu-settings" class="menu-item" type="button" role="menuitem">
+                <span class="menu-icon" aria-hidden="true">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                </span>
+                <span class="menu-label">Options</span>
+              </button>
+              <button id="menu-help" class="menu-item" type="button" role="menuitem">
+                <span class="menu-icon" aria-hidden="true">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                </span>
+                <span class="menu-label">Help</span>
+                <kbd class="menu-shortcut">F1</kbd>
+              </button>
+              <button id="menu-about" class="menu-item" type="button" role="menuitem">
+                <span class="menu-icon" aria-hidden="true">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                </span>
+                <span class="menu-label">About LitheXPDF</span>
+              </button>
             </div>
           </div>
           <div class="brand-lockup">
-            <span class="brand-icon" aria-hidden="true">PDF</span>
-            <div><p class="eyebrow">LITHEXPDF READER</p><h1 id="app-title">LitheXPDF</h1></div>
+            <span class="brand-icon" aria-hidden="true">
+              <svg viewBox="0 0 38 42" width="38" height="42" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <!-- Document plate -->
+                <path d="M6 3h18l8 8v28a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3z" fill="#f8fafc"/>
+                <path d="M24 3v8h8z" fill="#cbd5e1"/>
+                <!-- Lightning strike -->
+                <path d="M23 5L10 21h8L8 38l18-20h-7z" fill="url(#brand-lightning-grad)"/>
+                <path d="M21 9l-9 11h5l-6 11 11-12h-5z" fill="#fff" opacity="0.8"/>
+                <defs>
+                  <linearGradient id="brand-lightning-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stop-color="#ff3366"/>
+                    <stop offset="50%" stop-color="#ff1e56"/>
+                    <stop offset="100%" stop-color="#d60036"/>
+                  </linearGradient>
+                </defs>
+              </svg>
+            </span>
+            <div>
+              <p class="eyebrow"><span class="eyebrow-bolt" aria-hidden="true">⚡</span> PDF READER</p>
+              <h1 id="app-title">LitheX<span class="brand-accent">PDF</span></h1>
+            </div>
           </div>
         </div>
-        <div class="toolbar">
-          <button id="open-button" class="button button-primary" type="button">Open PDF</button>
-          <button id="close-button" class="button" type="button" disabled>Close tab</button>
-          <span class="toolbar-divider" aria-hidden="true"></span>
-          <button id="zoom-out-button" class="button button-square" type="button" aria-label="Zoom out" title="Zoom out" disabled>−</button>
-          <span id="zoom-level" class="zoom-level" aria-live="polite">100%</span>
-          <button id="zoom-in-button" class="button button-square" type="button" aria-label="Zoom in" title="Zoom in" disabled>+</button>
-          <button id="print-button" class="button" type="button" title="Print current page" disabled>Print</button>
-          <span class="toolbar-divider" aria-hidden="true"></span>
-          <button id="previous-button" class="button button-square" type="button" aria-label="Previous page" disabled>‹</button>
-          <label class="page-jump"><span class="sr-only">Go to page</span><input id="page-number" class="page-number-input" type="number" min="1" step="1" value="1" aria-label="Page number" disabled /><span id="page-total">/ —</span></label>
-          <button id="next-button" class="button button-square" type="button" aria-label="Next page" disabled>›</button>
-          <button id="bookmark-current" class="button button-square bookmark-current" type="button" aria-label="Bookmark current page" title="Bookmark current page" disabled>☆</button>
-          <button id="bookmarks-toggle" class="button" type="button" aria-expanded="false" aria-controls="bookmarks-panel" disabled>Bookmarks</button>
-          <form id="search-form" class="search-control" role="search">
-            <label class="sr-only" for="search-input">Search text in this PDF</label>
-            <input id="search-input" class="search-input" type="search" placeholder="Find in PDF" autocomplete="off" disabled />
-            <button id="search-button" class="button" type="submit" disabled>Find</button>
-          </form>
+        <div class="toolbar" role="group" aria-label="PDF reader controls">
+          <div class="toolbar-cluster toolbar-document-actions" role="group" aria-label="Document actions">
+            <button id="open-button" class="button button-primary" type="button" title="Open PDF (Ctrl+O)">
+              <span class="button-icon-lead" aria-hidden="true">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+              </span>
+              <span>Open PDF</span>
+            </button>
+            <button id="close-button" class="button" type="button" disabled title="Close current tab (Ctrl+W)">Close tab</button>
+          </div>
+          <div class="toolbar-cluster toolbar-view-actions" role="group" aria-label="Zoom and print">
+            <button id="zoom-out-button" class="button button-square" type="button" aria-label="Zoom out" title="Zoom out (Ctrl+-)" disabled>−</button>
+            <span id="zoom-level" class="zoom-level" aria-live="polite">100%</span>
+            <button id="zoom-in-button" class="button button-square" type="button" aria-label="Zoom in" title="Zoom in (Ctrl++)" disabled>+</button>
+            <button id="rotate-left-button" class="button button-square rotate-button" type="button" aria-label="Rotate pages left" title="Rotate pages left" disabled>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 2.6-6.4L3 8"></path><path d="M3 3v5h5"></path></svg>
+            </button>
+            <button id="rotate-right-button" class="button button-square rotate-button" type="button" aria-label="Rotate pages right" title="Rotate pages right" disabled>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4L21 8"></path><path d="M21 3v5h-5"></path></svg>
+            </button>
+            <button id="print-button" class="button" type="button" title="Print current page (Ctrl+P)" disabled>
+              <span class="button-icon-lead" aria-hidden="true">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+              </span>
+              <span>Print</span>
+            </button>
+          </div>
+          <div class="toolbar-cluster toolbar-page-actions" role="group" aria-label="Page navigation">
+            <button id="previous-button" class="button button-square" type="button" aria-label="Previous page" title="Previous page (Left arrow)" disabled>‹</button>
+            <label class="page-jump">
+              <span class="sr-only">Go to page</span>
+              <input id="page-number" class="page-number-input" type="number" min="1" step="1" value="1" aria-label="Page number" disabled />
+              <span id="page-total">/ —</span>
+            </label>
+            <button id="next-button" class="button button-square" type="button" aria-label="Next page" title="Next page (Right arrow)" disabled>›</button>
+          </div>
+          <div class="toolbar-cluster toolbar-bookmark-actions" role="group" aria-label="Bookmarks">
+            <button id="bookmark-current" class="button button-square bookmark-current" type="button" aria-label="Bookmark current page" title="Bookmark current page" disabled>☆</button>
+            <button id="bookmarks-toggle" class="button" type="button" aria-expanded="false" aria-controls="bookmarks-panel" title="Toggle bookmarks list" disabled>Bookmarks</button>
+          </div>
+          <div class="toolbar-cluster toolbar-search-cluster" role="group" aria-label="Search">
+            <form id="search-form" class="search-control" role="search">
+              <label class="sr-only" for="search-input">Search text in this PDF</label>
+              <span class="search-icon-prefix" aria-hidden="true">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+              </span>
+              <input id="search-input" class="search-input" type="search" placeholder="Find in PDF…" autocomplete="off" disabled />
+              <button id="search-button" class="button" type="submit" disabled>Find</button>
+            </form>
+          </div>
           <button id="theme-toggle" class="button theme-toggle" type="button" aria-label="Switch to light theme" aria-pressed="false" title="Switch theme">☀</button>
         </div>
       </header>
       <nav id="tab-strip" class="tab-strip" role="tablist" aria-label="Open PDF documents">
         <p id="tabs-empty" class="tabs-empty">No documents open</p>
-        <button id="new-tab-button" class="new-tab-button" type="button" aria-label="Open a PDF in a new tab" title="New tab">+</button>
+        <button id="new-tab-button" class="new-tab-button" type="button" aria-label="Open a PDF in a new tab" title="New tab (Ctrl+T)">+</button>
       </nav>
       <section class="document-bar">
         <span class="document-mark" aria-hidden="true"></span>
@@ -70,59 +204,180 @@
         <p id="status-text" role="status" aria-live="polite">Choose a PDF to begin.</p>
       </section>
       <section id="viewer" class="viewer" aria-label="PDF page">
-        <div id="empty-state" class="empty-state"><span class="empty-icon" aria-hidden="true">▤</span><h2>Open a document</h2><p>Select a local PDF to view its pages.</p></div>
-        <div id="loading-state" class="loading-state" hidden><span class="spinner" aria-hidden="true"></span><span>Rendering page…</span></div>
+        <div id="empty-state" class="empty-state">
+          <div class="empty-hero-graphic" aria-hidden="true">
+            <svg viewBox="0 0 96 112" width="96" height="112" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect x="4" y="4" width="88" height="104" rx="14" fill="url(#empty-bg-grad)" stroke="#ff1e56" stroke-width="2" stroke-opacity="0.35"/>
+              <path d="M22 18h36l18 18v56a4 4 0 0 1-4 4H22a4 4 0 0 1-4-4V22a4 4 0 0 1 4-4z" fill="#f8fafc"/>
+              <path d="M58 18v18h18z" fill="#cbd5e1"/>
+              <line x1="28" y1="48" x2="48" y2="48" stroke="#ff1e56" stroke-width="3.5" stroke-linecap="round"/>
+              <line x1="28" y1="58" x2="68" y2="58" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="28" y1="67" x2="62" y2="67" stroke="#cbd5e1" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="28" y1="76" x2="52" y2="76" stroke="#e2e8f0" stroke-width="2.5" stroke-linecap="round"/>
+              <path d="M56 22L32 54h14L30 86l32-38h-14z" fill="url(#empty-lightning-grad)"/>
+              <defs>
+                <linearGradient id="empty-bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#1b242a"/>
+                  <stop offset="100%" stop-color="#12181d"/>
+                </linearGradient>
+                <linearGradient id="empty-lightning-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#ff3b6f"/>
+                  <stop offset="50%" stop-color="#ff1e56"/>
+                  <stop offset="100%" stop-color="#d60036"/>
+                </linearGradient>
+              </defs>
+            </svg>
+          </div>
+          <h2>Your PDFs, ready to read</h2>
+          <p>Open a local document to view and navigate its pages.</p>
+          <div class="empty-actions">
+            <button class="button button-primary empty-open-button" type="button" onclick="document.getElementById('open-button').click()">
+              <span class="button-icon-lead" aria-hidden="true">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+              </span>
+              <span>Open Document</span>
+            </button>
+            <span class="empty-shortcut-hint">or press <kbd>Ctrl</kbd> + <kbd>O</kbd></span>
+          </div>
+        </div>
+        <div id="loading-state" class="loading-state" hidden>
+          <span class="spinner" aria-hidden="true"></span>
+          <span>Rendering page…</span>
+        </div>
         <div id="page-stack" class="page-stack" hidden><img id="page-image" alt="Rendered PDF page" hidden /></div>
         <aside id="search-panel" class="side-panel" aria-labelledby="search-panel-title" hidden>
-          <div class="side-panel-heading"><h2 id="search-panel-title">Search results</h2><button id="search-panel-close" class="icon-button" type="button" aria-label="Close search results">×</button></div>
-          <div class="search-options"><label><input id="search-match-case" type="checkbox" /> Match case</label><label><input id="search-whole-word" type="checkbox" /> Whole word</label></div>
+          <div class="side-panel-heading">
+            <h2 id="search-panel-title">Search results</h2>
+            <button id="search-panel-close" class="icon-button" type="button" aria-label="Close search results">×</button>
+          </div>
+          <div class="search-options">
+            <label><input id="search-match-case" type="checkbox" /> Match case</label>
+            <label><input id="search-whole-word" type="checkbox" /> Whole word</label>
+          </div>
           <p id="search-summary" role="status" aria-live="polite"></p>
           <ol id="search-results" class="result-list"></ol>
         </aside>
         <aside id="bookmarks-panel" class="side-panel" aria-labelledby="bookmarks-panel-title" aria-live="polite" tabindex="-1" hidden>
-          <div class="side-panel-heading"><h2 id="bookmarks-panel-title">Bookmarks</h2><button id="bookmarks-panel-close" class="icon-button" type="button" aria-label="Close bookmarks">×</button></div>
+          <div class="side-panel-heading">
+            <h2 id="bookmarks-panel-title">Bookmarks</h2>
+            <button id="bookmarks-panel-close" class="icon-button" type="button" aria-label="Close bookmarks">×</button>
+          </div>
           <p id="bookmarks-empty" class="panel-empty">No bookmarks yet.</p>
           <ul id="bookmark-list" class="bookmark-list"></ul>
         </aside>
         <div id="error-state" class="error-state" role="alert" hidden></div>
       </section>
-      <footer class="footer"><span>One active PDFium document</span><span id="page-size"></span></footer>
+      <footer class="footer">
+        <div class="footer-left">
+          <span class="footer-badge">PDFIUM</span>
+          <span>One active PDFium document</span>
+        </div>
+        <span id="page-size"></span>
+      </footer>
     </main>
 
     <dialog id="settings-dialog" class="app-dialog" aria-labelledby="settings-title">
-      <div class="dialog-heading"><div><p class="eyebrow">READER PREFERENCES</p><h2 id="settings-title">Options</h2></div><button class="icon-button" type="button" data-dialog-close aria-label="Close options">×</button></div>
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow">READER PREFERENCES</p>
+          <h2 id="settings-title">Options</h2>
+        </div>
+        <button class="icon-button" type="button" data-dialog-close aria-label="Close options">×</button>
+      </div>
       <fieldset class="render-options">
         <legend>Page rendering</legend>
-        <label class="render-choice"><input type="radio" name="render-mode" value="current" /><span><strong>No preloading</strong><small>Uses the least background CPU and encoded cache. A page starts rendering when you navigate to it.</small></span></label>
-        <label class="render-choice"><input type="radio" name="render-mode" value="nearby" /><span><strong>Light · up to 3 pages ahead</strong><small>Lower memory use. Starts after one second, then keeps nearby pages ready as you move through the document.</small></span></label>
-        <label class="render-choice"><input type="radio" name="render-mode" value="balanced" /><span><strong>Recommended · up to 12 pages ahead</strong><small>Default. Starts after one second, then keeps filling the active document's look-ahead window as you scroll.</small></span></label>
-        <label class="render-choice"><input type="radio" name="render-mode" value="maximum" /><span><strong>Maximum · up to 30 pages ahead</strong><small>Highest background CPU and cache use. Short documents may fit entirely; long documents use a rolling window and prepare more as you move through them.</small></span></label>
+        <label class="render-choice">
+          <input type="radio" name="render-mode" value="current" />
+          <span><strong>No preloading</strong><small>Uses the least background CPU and encoded cache. A page starts rendering when you navigate to it.</small></span>
+        </label>
+        <label class="render-choice">
+          <input type="radio" name="render-mode" value="nearby" />
+          <span><strong>Light · up to 3 pages ahead</strong><small>Lower memory use. Starts after one second, then keeps nearby pages ready as you move through the document.</small></span>
+        </label>
+        <label class="render-choice">
+          <input type="radio" name="render-mode" value="balanced" />
+          <span><strong>Recommended · up to 12 pages ahead</strong><small>Default. Starts after one second, then keeps filling the active document's look-ahead window as you scroll.</small></span>
+        </label>
+        <label class="render-choice">
+          <input type="radio" name="render-mode" value="maximum" />
+          <span><strong>Maximum · up to 30 pages ahead</strong><small>Highest background CPU and cache use. Short documents may fit entirely; long documents use a rolling window and prepare more as you move through them.</small></span>
+        </label>
       </fieldset>
       <p class="dialog-note">The encoded page cache is capped at 64 MiB and 30 pages. Only the active document is preloaded; inactive tabs keep metadata only and render after you switch to them. Changing to No preloading clears existing prefetched pages. Higher settings use more background CPU and can use more memory; these limits are initial targets, not measured savings.</p>
       <div class="dialog-actions"><button class="button button-primary" type="button" data-dialog-close>Done</button></div>
     </dialog>
 
-    <dialog id="about-dialog" class="app-dialog" aria-labelledby="about-title">
-      <div class="dialog-heading"><div><p class="eyebrow">ABOUT</p><h2 id="about-title">LitheXPDF</h2></div><button class="icon-button" type="button" data-dialog-close aria-label="Close about">×</button></div>
-      <p class="about-version">Version <span id="app-version">0.1.0</span></p>
-      <div class="developer-card">
-        <span class="developer-label">Developed by</span>
-        <strong>Fahad Ibne Fahian</strong>
-        <span>Software Engineer · Finland</span>
-        <a href="mailto:hello@fahadibnefahian.com">hello@fahadibnefahian.com</a>
-        <div class="developer-links"><a href="https://fahadibnefahian.com/" target="_blank" rel="noopener noreferrer">Website</a><a href="https://linkedin.com/in/fahadibnefahian" target="_blank" rel="noopener noreferrer">LinkedIn</a><a href="https://github.com/FahadiF" target="_blank" rel="noopener noreferrer">GitHub</a></div>
-        <p class="license-summary">Open-source software under the <a href="https://opensource.org/license/mit" target="_blank" rel="noopener noreferrer">MIT License</a>.</p>
-      </div>
+    <dialog id="about-dialog" class="app-dialog about-dialog" aria-labelledby="about-title">
+      <header class="about-hero">
+        <span class="about-brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 46 52" width="46" height="52" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M7 4h21l11 11v33a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3z" fill="#f8fafc"/>
+            <path d="M28 4v11h11z" fill="#cbd5e1"/>
+            <path d="M27 7L12 25h10L9 47l22-24h-8z" fill="url(#about-lightning-grad)"/>
+            <path d="M25 11l-10 13h6l-7 13 13-14h-6z" fill="#fff" opacity="0.85"/>
+            <defs>
+              <linearGradient id="about-lightning-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#ff3366"/>
+                <stop offset="50%" stop-color="#ff1e56"/>
+                <stop offset="100%" stop-color="#d60036"/>
+              </linearGradient>
+            </defs>
+          </svg>
+        </span>
+        <div class="about-intro">
+          <p class="eyebrow">ABOUT</p>
+          <h2 id="about-title">LitheXPDF</h2>
+          <p>Desktop PDF reader built with Rust, Tauri 2, and PDFium.</p>
+        </div>
+        <div class="about-version"><span>VERSION</span><strong id="app-version">0.1.0</strong></div>
+        <button class="icon-button about-close" type="button" data-dialog-close aria-label="Close about">×</button>
+      </header>
+      <section class="about-content" aria-label="Project information">
+        <nav class="about-links" aria-label="Project links">
+          <a class="about-link" href="https://fahadibnefahian.com/" target="_blank" rel="noopener noreferrer">
+            <span class="about-link-icon" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M2 12h20"></path><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+            </span>
+            <span class="about-link-copy"><strong>Developer Website</strong></span>
+            <span class="about-link-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="about-link" href="https://github.com/FahadiF/LithexPDF" target="_blank" rel="noopener noreferrer">
+          <span class="about-link-icon about-link-icon-repo" aria-hidden="true">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .7a11.3 11.3 0 0 0-3.57 22.02c.57.1.77-.25.77-.55v-2.1c-3.14.68-3.8-1.33-3.8-1.33-.52-1.3-1.27-1.65-1.27-1.65-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.02 1.75 2.67 1.25 3.32.96.1-.74.4-1.25.72-1.54-2.5-.29-5.13-1.25-5.13-5.57 0-1.23.44-2.23 1.17-3.02-.12-.29-.51-1.43.11-2.98 0 0 .95-.3 3.11 1.16a10.8 10.8 0 0 1 5.66 0c2.16-1.46 3.1-1.16 3.1-1.16.63 1.55.24 2.69.12 2.98.73.79 1.17 1.79 1.17 3.02 0 4.33-2.63 5.28-5.14 5.56.4.35.76 1.03.76 2.08v3.08c0 .3.2.66.78.55A11.3 11.3 0 0 0 12 .7Z"/></svg>
+          </span>
+            <span class="about-link-copy"><strong>Project Repository</strong></span>
+            <span class="about-link-arrow" aria-hidden="true">↗</span>
+          </a>
+          <a class="about-contact" href="mailto:contact@fahadibnefahian.com">Inquiries: contact@fahadibnefahian.com</a>
+        </nav>
+        <aside class="about-license" aria-labelledby="license-title">
+          <div class="license-heading">
+            <span class="license-mark" aria-hidden="true">MIT</span>
+            <div><p class="license-eyebrow">OPEN SOURCE</p><h3 id="license-title">MIT License</h3></div>
+          </div>
+          <p class="license-description">Open-source software released under the MIT License.</p>
+          <a class="license-link" href="https://opensource.org/license/mit" target="_blank" rel="noopener noreferrer">Read the license <span aria-hidden="true">↗</span></a>
+        </aside>
+      </section>
       <div class="dialog-actions"><button class="button button-primary" type="button" data-dialog-close>Done</button></div>
     </dialog>
 
     <dialog id="help-dialog" class="app-dialog" aria-labelledby="help-title">
-      <div class="dialog-heading"><div><p class="eyebrow">QUICK GUIDE</p><h2 id="help-title">Help</h2></div><button class="icon-button" type="button" data-dialog-close aria-label="Close help">×</button></div>
+      <div class="dialog-heading">
+        <div><p class="eyebrow">QUICK GUIDE</p><h2 id="help-title">Keyboard Shortcuts & Help</h2></div>
+        <button class="icon-button" type="button" data-dialog-close aria-label="Close help">×</button>
+      </div>
       <ul class="help-list">
-        <li>Open PDFs with <kbd>Ctrl</kbd> + <kbd>O</kbd>; each document opens in a tab.</li>
-        <li>Use the page field, Previous/Next, or scroll through the document.</li>
-        <li>Print opens the system print dialog for the displayed page; printer and paper options depend on the selected printer. All-page and page-range printing are not available yet.</li>
-        <li>Recent file paths are stored locally in this browser profile. Background tabs keep only their file path and view position. The worker opens one PDF at a time.</li>
+        <li><strong>Open PDF:</strong> <kbd>Ctrl</kbd> + <kbd>O</kbd> — Opens one or more documents in tabs.</li>
+        <li><strong>New Tab:</strong> <kbd>Ctrl</kbd> + <kbd>T</kbd> — Open another PDF in a fresh tab.</li>
+        <li><strong>Close Tab:</strong> <kbd>Ctrl</kbd> + <kbd>W</kbd> — Close the active document tab.</li>
+        <li><strong>Navigation:</strong> Use the Previous/Next buttons, left/right arrow keys, mouse wheel, or page number field.</li>
+        <li><strong>Zoom:</strong> <kbd>Ctrl</kbd> + <kbd>+</kbd> and <kbd>Ctrl</kbd> + <kbd>-</kbd> to zoom in or out.</li>
+        <li><strong>Rotate:</strong> Use the rotate buttons to change the active tab’s viewing angle. Rotation is saved with the tab and does not modify the PDF; printing keeps the file’s original orientation.</li>
+        <li><strong>Find in Document:</strong> Search text across the PDF. Scanned pages without a text layer are not searchable.</li>
+        <li><strong>Tabs:</strong> Only one document is open in the native PDF renderer at a time. Background tabs retain their path and view state.</li>
+        <li><strong>Print:</strong> <kbd>Ctrl</kbd> + <kbd>P</kbd> prints the current rendered page.</li>
+        <li><strong>Help:</strong> Press <kbd>F1</kbd> to open this guide.</li>
       </ul>
       <div class="dialog-actions"><button class="button button-primary" type="button" data-dialog-close>Done</button></div>
     </dialog>
