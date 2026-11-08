@@ -2,7 +2,7 @@
   "name": "lithexpdf",
   "private": true,
   "version": "0.1.0",
-  "description": "A lightweight Windows PDF reader scaffold",
+  "description": "Early-stage Windows PDF reader built with Rust, Tauri 2, TypeScript, and PDFium",
   "packageManager": "pnpm@11.25.0",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
@@ -21,9 +21,10 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0",
-    "happy-dom": "^20.0.0",
+    "@types/node": "^26.6.6",
+    "happy-dom": "^21.0.4",
     "typescript": "^5.8.0",
-    "vite": "^6.0.0",
-    "vitest": "^3.0.0"
+    "vite": "^6.4.5",
+    "vitest": "^4.1.12"
   }
 }

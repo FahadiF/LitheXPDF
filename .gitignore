@@ -6,3 +6,19 @@
 /src-tauri/binaries/pdfium-worker-*.exe
 *.pdfium-tmp
 
+
+# Local credentials and signing material
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Local diagnostics and generated Windows artifacts
+*.log
+*.dmp
+*.pdb
+Thumbs.db
+.DS_Store
