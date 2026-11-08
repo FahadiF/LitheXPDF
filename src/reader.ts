@@ -1,10 +1,13 @@
 import type { InvokeArgs } from "@tauri-apps/api/core";
+import { LocalBookmarkStore, type Bookmark, type BookmarkStore } from "./bookmarks";
 
 const HEADER = 20;
 const IMAGE_MAX = 32 * 1024 * 1024;
 const METADATA_MAX = 4 * 1024;
 const MAX_DIMENSION = 8192;
 const MAX_PIXELS = 8_388_608;
+const MAX_SEARCH_RESULTS = 250;
+const MAX_SEARCH_EXCERPT_BYTES = 128;
 const VERSION = 1;
 const PAGE_KIND = 0x8003;
 
@@ -24,6 +27,9 @@ export interface RenderIdentity {
 }
 
 export interface ParsedPage { requestId: bigint; width: number; height: number; png: Uint8Array; }
+
+export interface TextSearchMatch { page_index: number; text: string; }
+export interface TextSearchResponse { matches: TextSearchMatch[]; truncated: boolean; }
 
 export function parseRenderResponse(buffer: ArrayBuffer, expected: RenderIdentity): ParsedPage {
   if (buffer.byteLength < HEADER + 42 || buffer.byteLength > HEADER + IMAGE_MAX + METADATA_MAX) throw new Error("The PDF worker returned a response with an invalid size.");
@@ -63,6 +69,7 @@ export interface ReaderBridge {
   invoke<T>(command: string, args?: InvokeArgs): Promise<T>;
   createObjectURL?(blob: Blob): string;
   revokeObjectURL?(url: string): void;
+  bookmarks?: BookmarkStore;
 }
 
 export class PdfReaderUi {
@@ -73,21 +80,42 @@ export class PdfReaderUi {
   private readonly loading: HTMLElement;
   private readonly error: HTMLElement;
   private readonly empty: HTMLElement;
-  private readonly pageCounter: HTMLElement;
+  private readonly pageNumber: HTMLInputElement;
+  private readonly pageTotal: HTMLElement;
   private readonly name: HTMLElement;
   private readonly pageSize: HTMLElement;
   private readonly openButton: HTMLButtonElement;
   private readonly closeButton: HTMLButtonElement;
   private readonly previousButton: HTMLButtonElement;
   private readonly nextButton: HTMLButtonElement;
+  private readonly bookmarkButton: HTMLButtonElement;
+  private readonly bookmarksToggle: HTMLButtonElement;
+  private readonly bookmarksPanel: HTMLElement;
+  private readonly bookmarksList: HTMLElement;
+  private readonly bookmarksEmpty: HTMLElement;
+  private readonly searchForm: HTMLFormElement;
+  private readonly searchInput: HTMLInputElement;
+  private readonly searchButton: HTMLButtonElement;
+  private readonly searchPanel: HTMLElement;
+  private readonly searchSummary: HTMLElement;
+  private readonly searchResults: HTMLElement;
+  private readonly searchMatchCase: HTMLInputElement;
+  private readonly searchWholeWord: HTMLInputElement;
+  private readonly bookmarkStore: BookmarkStore;
   private pageSlots: HTMLElement[] = [];
   private current?: OpenPdfResult;
+  private currentPath?: string;
+  private bookmarks: Bookmark[] = [];
   private pageIndex = 0;
   private objectUrl?: string;
   private generationToken = 0;
   private renderToken = 0;
   private activeRequestToken?: string;
   private scrollTimer?: ReturnType<typeof setTimeout>;
+  private searchTimer?: ReturnType<typeof setTimeout>;
+  private searchSequence = 0;
+  private searchRunning = false;
+  private queuedSearch?: { sequence: number; documentId: string; generation: number; query: string; matchCase: boolean; wholeWord: boolean };
 
   constructor(private readonly root: ParentNode, private readonly bridge: ReaderBridge) {
     this.image = this.required("#page-image");
@@ -97,18 +125,46 @@ export class PdfReaderUi {
     this.loading = this.required("#loading-state");
     this.error = this.required("#error-state");
     this.empty = this.required("#empty-state");
-    this.pageCounter = this.required("#page-counter");
+    this.pageNumber = this.required("#page-number");
+    this.pageTotal = this.required("#page-total");
     this.name = this.required("#document-name");
     this.pageSize = this.required("#page-size");
     this.openButton = this.required("#open-button");
     this.closeButton = this.required("#close-button");
     this.previousButton = this.required("#previous-button");
     this.nextButton = this.required("#next-button");
+    this.bookmarkButton = this.required("#bookmark-current");
+    this.bookmarksToggle = this.required("#bookmarks-toggle");
+    this.bookmarksPanel = this.required("#bookmarks-panel");
+    this.bookmarksList = this.required("#bookmark-list");
+    this.bookmarksEmpty = this.required("#bookmarks-empty");
+    this.searchForm = this.required("#search-form");
+    this.searchInput = this.required("#search-input");
+    this.searchButton = this.required("#search-button");
+    this.searchPanel = this.required("#search-panel");
+    this.searchSummary = this.required("#search-summary");
+    this.searchResults = this.required("#search-results");
+    this.searchMatchCase = this.required("#search-match-case");
+    this.searchWholeWord = this.required("#search-whole-word");
+    this.bookmarkStore = bridge.bookmarks ?? new LocalBookmarkStore();
     this.openButton.addEventListener("click", () => void this.openPicker());
     this.closeButton.addEventListener("click", () => void this.close());
     this.previousButton.addEventListener("click", () => this.navigateToPage(this.pageIndex - 1));
     this.nextButton.addEventListener("click", () => this.navigateToPage(this.pageIndex + 1));
     this.viewer.addEventListener("scroll", () => this.scheduleViewportPageRender());
+    this.pageNumber.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") { event.preventDefault(); this.jumpToEnteredPage(); }
+    });
+    this.pageNumber.addEventListener("change", () => this.jumpToEnteredPage());
+    this.pageNumber.addEventListener("blur", () => this.resetPageInput());
+    this.bookmarkButton.addEventListener("click", () => void this.toggleBookmark());
+    this.bookmarksToggle.addEventListener("click", () => this.toggleBookmarksPanel());
+    this.required<HTMLButtonElement>("#bookmarks-panel-close").addEventListener("click", () => this.setBookmarksPanel(false));
+    this.required<HTMLButtonElement>("#search-panel-close").addEventListener("click", () => { this.searchPanel.hidden = true; });
+    this.searchForm.addEventListener("submit", (event) => { event.preventDefault(); this.startSearch(true); });
+    this.searchInput.addEventListener("input", () => this.startSearch(false));
+    this.searchMatchCase.addEventListener("change", () => this.startSearch(true));
+    this.searchWholeWord.addEventListener("change", () => this.startSearch(true));
   }
 
   private required<T extends HTMLElement>(selector: string): T {
@@ -131,8 +187,16 @@ export class PdfReaderUi {
     this.cancelCurrentRender();
     this.clearImage();
     this.current = undefined;
+    this.currentPath = undefined;
+    this.bookmarks = [];
+    this.renderBookmarks();
+    this.setBookmarksPanel(false);
+    this.invalidateSearch();
     this.pageIndex = 0;
     this.pageSlots = [];
+    this.pageNumber.value = "";
+    this.pageTotal.textContent = "/ —";
+    this.pageSize.textContent = "";
     this.pageStack.replaceChildren();
     this.pageStack.hidden = true;
     this.updateControls();
@@ -146,10 +210,24 @@ export class PdfReaderUi {
       const result = await this.bridge.invoke<OpenPdfResult>("open_pdf", { documentId, path });
       if (token !== this.generationToken) { await this.bridge.invoke("close_pdf", { documentId, generation: result.generation }); return; }
       this.current = result;
+      this.currentPath = path;
+      try {
+        this.bookmarks = (await this.bookmarkStore.load(path))
+          .filter((bookmark) => bookmark.pageNumber <= result.page_count);
+      } catch (error) {
+        this.bookmarks = [];
+        this.showError(`Could not load bookmarks: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      if (token !== this.generationToken) {
+        await this.bridge.invoke("close_pdf", { documentId, generation: result.generation });
+        return;
+      }
+      this.renderBookmarks();
       this.name.textContent = path.split(/[\\/]/).at(-1) ?? path;
       this.pageIndex = 0;
       this.createPageSlots(result);
-      this.pageCounter.textContent = `1 / ${result.page_count}`;
+      this.pageNumber.value = "1";
+      this.pageTotal.textContent = `/ ${result.page_count}`;
       this.pageSize.textContent = `${result.page_width_points.toFixed(0)} × ${result.page_height_points.toFixed(0)} pt`;
       this.updateControls();
       await this.showPage(0);
@@ -159,6 +237,10 @@ export class PdfReaderUi {
         this.pageStack.hidden = true;
         this.pageStack.replaceChildren();
         this.pageSlots = [];
+        this.current = undefined;
+        this.currentPath = undefined;
+        this.bookmarks = [];
+        this.renderBookmarks();
         this.name.textContent = "No document open";
         this.empty.hidden = false;
         this.showError(error);
@@ -212,6 +294,195 @@ export class PdfReaderUi {
     void this.showPage(index);
   }
 
+  private jumpToEnteredPage(): void {
+    if (!this.current) return;
+    const pageNumber = Number(this.pageNumber.value);
+    if (!Number.isSafeInteger(pageNumber) || pageNumber < 1 || pageNumber > this.current.page_count) {
+      this.pageNumber.setAttribute("aria-invalid", "true");
+      return;
+    }
+    this.pageNumber.setAttribute("aria-invalid", "false");
+    if (pageNumber === this.pageIndex + 1) return;
+    this.navigateToPage(pageNumber - 1);
+  }
+
+  private resetPageInput(): void {
+    this.pageNumber.setAttribute("aria-invalid", "false");
+    if (this.current) this.pageNumber.value = String(this.pageIndex + 1);
+  }
+
+  private async toggleBookmark(): Promise<void> {
+    const doc = this.current;
+    const path = this.currentPath;
+    if (!doc || !path) return;
+    const existing = this.bookmarks.some((bookmark) => bookmark.pageNumber === this.pageIndex + 1);
+    const updated = existing
+      ? this.bookmarks.filter((bookmark) => bookmark.pageNumber !== this.pageIndex + 1)
+      : [...this.bookmarks, { pageNumber: this.pageIndex + 1, label: `Page ${this.pageIndex + 1}` }]
+        .sort((left, right) => left.pageNumber - right.pageNumber);
+    try {
+      await this.bookmarkStore.save(path, updated);
+      if (this.current?.document_id !== doc.document_id || this.current.generation !== doc.generation) return;
+      this.bookmarks = updated;
+      this.renderBookmarks();
+      this.updateControls();
+    } catch (error) {
+      this.showError(`Could not save bookmark: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private renderBookmarks(): void {
+    this.bookmarksList.replaceChildren();
+    this.bookmarksEmpty.hidden = this.bookmarks.length > 0;
+    for (const bookmark of this.bookmarks) {
+      const item = this.image.ownerDocument.createElement("li");
+      item.className = "bookmark-row";
+      const open = this.image.ownerDocument.createElement("button");
+      open.type = "button";
+      open.className = "bookmark-open";
+      open.textContent = `${bookmark.label} · page ${bookmark.pageNumber}`;
+      open.addEventListener("click", () => {
+        this.navigateToPage(bookmark.pageNumber - 1);
+        this.setBookmarksPanel(false);
+      });
+      const remove = this.image.ownerDocument.createElement("button");
+      remove.type = "button";
+      remove.className = "bookmark-remove";
+      remove.textContent = "×";
+      remove.setAttribute("aria-label", `Remove bookmark for page ${bookmark.pageNumber}`);
+      remove.addEventListener("click", () => void this.removeBookmark(bookmark.pageNumber));
+      item.append(open, remove);
+      this.bookmarksList.append(item);
+    }
+    this.updateControls();
+  }
+
+  private async removeBookmark(pageNumber: number): Promise<void> {
+    const doc = this.current;
+    const path = this.currentPath;
+    if (!doc || !path) return;
+    const updated = this.bookmarks.filter((bookmark) => bookmark.pageNumber !== pageNumber);
+    try {
+      await this.bookmarkStore.save(path, updated);
+      if (this.current?.document_id !== doc.document_id || this.current.generation !== doc.generation) return;
+      this.bookmarks = updated;
+      this.renderBookmarks();
+    } catch (error) {
+      this.showError(`Could not remove bookmark: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private toggleBookmarksPanel(): void {
+    this.setBookmarksPanel(this.bookmarksPanel.hidden);
+  }
+
+  private setBookmarksPanel(open: boolean): void {
+    this.bookmarksPanel.hidden = !open;
+    this.bookmarksToggle.setAttribute("aria-expanded", String(open));
+    if (open) this.searchPanel.hidden = true;
+  }
+
+  private startSearch(immediate: boolean): void {
+    const doc = this.current;
+    const query = this.searchInput.value.trim();
+    const sequence = ++this.searchSequence;
+    if (this.searchTimer !== undefined) clearTimeout(this.searchTimer);
+    this.searchTimer = undefined;
+    if (!doc || query.length === 0) {
+      this.queuedSearch = undefined;
+      this.searchPanel.hidden = !doc;
+      this.searchResults.replaceChildren();
+      this.searchSummary.textContent = doc ? "Enter text to search for." : "";
+      return;
+    }
+    const request = {
+      sequence,
+      documentId: doc.document_id,
+      generation: doc.generation,
+      query,
+      matchCase: this.searchMatchCase.checked,
+      wholeWord: this.searchWholeWord.checked,
+    };
+    this.searchPanel.hidden = false;
+    this.bookmarksPanel.hidden = true;
+    this.bookmarksToggle.setAttribute("aria-expanded", "false");
+    this.searchSummary.textContent = "Searching document…";
+    this.searchResults.replaceChildren();
+    if (immediate) this.queueSearch(request);
+    else this.searchTimer = setTimeout(() => { this.searchTimer = undefined; this.queueSearch(request); }, 250);
+  }
+
+  private queueSearch(request: NonNullable<PdfReaderUi["queuedSearch"]>): void {
+    if (this.searchRunning) {
+      this.queuedSearch = request;
+      return;
+    }
+    void this.executeSearch(request);
+  }
+
+  private async executeSearch(request: NonNullable<PdfReaderUi["queuedSearch"]>): Promise<void> {
+    this.searchRunning = true;
+    try {
+      const response = await this.bridge.invoke<unknown>("search_text", {
+        documentId: request.documentId,
+        generation: request.generation,
+        query: request.query,
+        matchCase: request.matchCase,
+        wholeWord: request.wholeWord,
+      });
+      const result = validateTextSearchResponse(response, this.current?.page_count ?? 0);
+      if (request.sequence === this.searchSequence
+        && this.current?.document_id === request.documentId
+        && this.current.generation === request.generation) this.renderSearchResults(result);
+    } catch (error) {
+      if (request.sequence === this.searchSequence) {
+        this.searchSummary.textContent = `Search failed: ${error instanceof Error ? error.message : String(error)}`;
+      }
+    } finally {
+      this.searchRunning = false;
+      const queued = this.queuedSearch;
+      this.queuedSearch = undefined;
+      if (queued && queued.sequence === this.searchSequence) void this.executeSearch(queued);
+    }
+  }
+
+  private renderSearchResults(result: TextSearchResponse): void {
+    this.searchResults.replaceChildren();
+    const count = result.matches.length;
+    this.searchSummary.textContent = count === 0
+      ? "No text matches found. Scanned-image pages are not searchable."
+      : `${result.truncated ? `First ${count} matches shown; refine your search. ` : ""}${count} match${count === 1 ? "" : "es"}.`;
+    for (const match of result.matches) {
+      const item = this.image.ownerDocument.createElement("li");
+      const button = this.image.ownerDocument.createElement("button");
+      button.type = "button";
+      const page = this.image.ownerDocument.createElement("span");
+      page.className = "result-page";
+      page.textContent = `Page ${match.page_index + 1}`;
+      const excerpt = this.image.ownerDocument.createElement("span");
+      excerpt.className = "result-excerpt";
+      excerpt.textContent = match.text;
+      button.append(page, excerpt);
+      button.addEventListener("click", () => {
+        this.navigateToPage(match.page_index);
+        this.searchPanel.hidden = true;
+      });
+      item.append(button);
+      this.searchResults.append(item);
+    }
+  }
+
+  private invalidateSearch(): void {
+    this.searchSequence++;
+    if (this.searchTimer !== undefined) clearTimeout(this.searchTimer);
+    this.searchTimer = undefined;
+    this.queuedSearch = undefined;
+    this.searchInput.value = "";
+    this.searchSummary.textContent = "";
+    this.searchResults.replaceChildren();
+    this.searchPanel.hidden = true;
+  }
+
   private async showPage(index: number): Promise<void> {
     const doc = this.current;
     if (!doc || index < 0 || index >= doc.page_count) return;
@@ -225,7 +496,9 @@ export class PdfReaderUi {
     this.loading.hidden = false;
     this.status.textContent = "Rendering page";
     this.pageIndex = index;
-    this.pageCounter.textContent = `${index + 1} / ${doc.page_count}`;
+    this.pageNumber.value = String(index + 1);
+    this.pageNumber.setAttribute("aria-invalid", "false");
+    this.pageTotal.textContent = `/ ${doc.page_count}`;
     this.updateControls();
     try {
       const dpr = Math.min(globalThis.devicePixelRatio || 1, 2);
@@ -262,6 +535,11 @@ export class PdfReaderUi {
     ++this.renderToken;
     this.cancelCurrentRender();
     this.current = undefined;
+    this.currentPath = undefined;
+    this.bookmarks = [];
+    this.renderBookmarks();
+    this.invalidateSearch();
+    this.setBookmarksPanel(false);
     this.pageIndex = 0;
     if (this.scrollTimer !== undefined) clearTimeout(this.scrollTimer);
     this.scrollTimer = undefined;
@@ -281,7 +559,8 @@ export class PdfReaderUi {
       this.pageSlots = [];
       this.name.textContent = "No document open";
       this.empty.hidden = false;
-      this.pageCounter.textContent = "— / —";
+      this.pageNumber.value = "";
+      this.pageTotal.textContent = "/ —";
       this.pageSize.textContent = "";
     }
   }
@@ -312,8 +591,46 @@ export class PdfReaderUi {
     this.closeButton.disabled = !doc;
     this.previousButton.disabled = !doc || this.pageIndex <= 0;
     this.nextButton.disabled = !doc || this.pageIndex >= doc.page_count - 1;
+    this.pageNumber.disabled = !doc;
+    this.pageNumber.max = doc ? String(doc.page_count) : "";
+    if (doc) this.pageNumber.value = String(this.pageIndex + 1);
+    this.pageTotal.textContent = doc ? `/ ${doc.page_count}` : "/ —";
+    this.bookmarkButton.disabled = !doc;
+    this.bookmarksToggle.disabled = !doc;
+    this.searchInput.disabled = !doc;
+    this.searchButton.disabled = !doc;
+    this.searchMatchCase.disabled = !doc;
+    this.searchWholeWord.disabled = !doc;
+    const currentIsBookmarked = this.bookmarks.some((bookmark) => bookmark.pageNumber === this.pageIndex + 1);
+    this.bookmarkButton.textContent = currentIsBookmarked ? "★" : "☆";
+    this.bookmarkButton.setAttribute("aria-label", currentIsBookmarked ? "Remove bookmark from current page" : "Bookmark current page");
+    this.bookmarkButton.title = currentIsBookmarked ? "Remove bookmark" : "Bookmark current page";
     this.openButton.disabled = false;
   }
+}
+
+function validateTextSearchResponse(value: unknown, pageCount: number): TextSearchResponse {
+  if (!value || typeof value !== "object") throw new Error("Worker returned malformed search results.");
+  const candidate = value as Partial<TextSearchResponse>;
+  if (!Array.isArray(candidate.matches)
+    || candidate.matches.length > MAX_SEARCH_RESULTS
+    || typeof candidate.truncated !== "boolean") {
+    throw new Error("Worker returned search results outside the allowed limits.");
+  }
+  const encoder = new TextEncoder();
+  const matches: TextSearchMatch[] = candidate.matches.map((match) => {
+    if (!match || typeof match !== "object"
+      || !Number.isSafeInteger(match.page_index)
+      || match.page_index < 0
+      || match.page_index >= pageCount
+      || typeof match.text !== "string"
+      || match.text.length === 0
+      || encoder.encode(match.text).byteLength > MAX_SEARCH_EXCERPT_BYTES) {
+      throw new Error("Worker returned an invalid search result entry.");
+    }
+    return { page_index: match.page_index, text: match.text };
+  });
+  return { matches, truncated: candidate.truncated };
 }
 
 function uuidBytes(value: string): Uint8Array {

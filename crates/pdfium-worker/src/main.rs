@@ -3,10 +3,13 @@
 
 use image::ImageEncoder;
 use pdfium_protocol::{
-    encode, parse_header, read_u32, read_u64, validate_bitmap, Frame, Kind, MAX_CONTROL_PAYLOAD,
-    MAX_IMAGE_BYTES, OPEN_ACK_LEN,
+    encode, parse_header, read_u16, read_u32, read_u64, validate_bitmap, Frame, Kind,
+    MAX_CONTROL_PAYLOAD, MAX_IMAGE_BYTES, MAX_SEARCH_EXCERPT_BYTES, MAX_SEARCH_QUERY_BYTES,
+    MAX_SEARCH_RESULTS, OPEN_ACK_LEN,
 };
-use pdfium_render::prelude::{PdfDocument, PdfRenderConfig, Pdfium};
+use pdfium_render::prelude::{
+    PdfDocument, PdfRenderConfig, PdfSearchDirection, PdfSearchOptions, Pdfium,
+};
 use std::ffi::OsString;
 use std::fs;
 use std::io::{self, Read, Write};
@@ -124,6 +127,7 @@ impl WorkerSession {
         match kind {
             Kind::Open => self.open(payload),
             Kind::Render => self.render(payload),
+            Kind::Search => self.search(payload),
             Kind::Close => self.close(payload),
             _ => Err((2, format!("message kind {kind:?} is not a worker request"))),
         }
@@ -268,6 +272,97 @@ impl WorkerSession {
         Ok((Kind::Page, response))
     }
 
+    fn search(&mut self, payload: &[u8]) -> Result<(Kind, Vec<u8>), (u16, String)> {
+        const REQUEST_FIXED_LEN: usize = 27;
+        if payload.len() < REQUEST_FIXED_LEN {
+            return Err((4, "SEARCH payload is truncated".into()));
+        }
+        let tab_id: [u8; 16] = payload[..16]
+            .try_into()
+            .map_err(|_| (4, "invalid tab identifier".into()))?;
+        let generation = read_u64(payload, 16).map_err(protocol_err)?;
+        let flags = payload[24];
+        let query_len = read_u16(payload, 25).map_err(protocol_err)? as usize;
+        let expected_len = REQUEST_FIXED_LEN
+            .checked_add(query_len)
+            .ok_or_else(|| (4, "SEARCH query length overflow".into()))?;
+        if self.identity != Some((tab_id, generation)) {
+            return Err((
+                6,
+                "search does not match the active document generation".into(),
+            ));
+        }
+        if generation == 0
+            || flags & !0b11 != 0
+            || query_len == 0
+            || query_len > MAX_SEARCH_QUERY_BYTES
+            || expected_len != payload.len()
+            || payload.len() > MAX_CONTROL_PAYLOAD
+        {
+            return Err((4, "invalid SEARCH flags or query length".into()));
+        }
+        let query = std::str::from_utf8(&payload[REQUEST_FIXED_LEN..])
+            .map_err(|_| (4, "SEARCH query is not UTF-8".into()))?;
+        if query.trim().is_empty() {
+            return Err((4, "SEARCH query is empty".into()));
+        }
+        let document = self
+            .document
+            .as_ref()
+            .ok_or_else(|| (6, "no document is open".into()))?;
+        let options = PdfSearchOptions::new()
+            .match_case(flags & 0b01 != 0)
+            .match_whole_word(flags & 0b10 != 0);
+        let mut matches: Vec<(u32, Vec<u8>)> = Vec::new();
+        let mut truncated = false;
+        'pages: for page_index in 0..document.pages().len() {
+            let page = document
+                .pages()
+                .get(page_index)
+                .map_err(|e| (7, format!("could not open page for search: {e}")))?;
+            let text = page
+                .text()
+                .map_err(|e| (7, format!("could not read page text: {e}")))?;
+            let search = text
+                .search(query, &options)
+                .map_err(|e| (7, format!("could not search page text: {e}")))?;
+            for result in search.iter(PdfSearchDirection::SearchForward) {
+                if matches.len() == MAX_SEARCH_RESULTS {
+                    truncated = true;
+                    break 'pages;
+                }
+                let text = result
+                    .iter()
+                    .map(|segment| segment.text())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let excerpt = bounded_match_text(text);
+                if !excerpt.is_empty() {
+                    matches.push((page_index as u32, excerpt));
+                }
+            }
+        }
+
+        let mut response = Vec::with_capacity(28 + matches.len() * 16);
+        response.extend_from_slice(&tab_id);
+        response.extend_from_slice(&generation.to_be_bytes());
+        response.extend_from_slice(&(matches.len() as u16).to_be_bytes());
+        response.push(u8::from(truncated));
+        response.push(0);
+        for (page_index, excerpt) in matches {
+            response.extend_from_slice(&page_index.to_be_bytes());
+            response.extend_from_slice(&(excerpt.len() as u16).to_be_bytes());
+            response.extend_from_slice(&excerpt);
+        }
+        if response.len() > MAX_CONTROL_PAYLOAD {
+            return Err((
+                8,
+                "SEARCH results exceeded the bounded response size".into(),
+            ));
+        }
+        Ok((Kind::SearchResults, response))
+    }
+
     fn close(&mut self, payload: &[u8]) -> Result<(Kind, Vec<u8>), (u16, String)> {
         if payload.len() != 24 {
             return Err((4, "CLOSE payload must be 24 bytes".into()));
@@ -286,6 +381,17 @@ impl WorkerSession {
         self.identity = None;
         Ok((Kind::Ack, payload.to_vec()))
     }
+}
+
+fn bounded_match_text(text: String) -> Vec<u8> {
+    let mut result = String::new();
+    for character in text.chars() {
+        if result.len() + character.len_utf8() > MAX_SEARCH_EXCERPT_BYTES {
+            break;
+        }
+        result.push(character);
+    }
+    result.into_bytes()
 }
 
 fn protocol_err(error: pdfium_protocol::ProtocolError) -> (u16, String) {

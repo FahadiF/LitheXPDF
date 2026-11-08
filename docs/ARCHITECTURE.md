@@ -299,3 +299,36 @@ remains full-page rendering with one active image; tiles, parallel renderers,
 and multiple live documents are not part of this change. A five-slot DOM
 experiment was reverted because it cut off full-document navigation. Runtime
 UI verification and memory measurement remain pending.
+
+## Reader controls and persistent preferences — 2026-11-08
+
+The toolbar accepts a one-based page number between 1 and the active
+document's page count. It validates the range before navigating; Previous and
+Next remain available and the current page field follows viewport scrolling.
+
+Bookmarks are separate UI metadata, not part of the PDFium document state.
+The frontend stores page number and a short label in WebView local storage,
+keyed by SHA-256 of the normalized document path. This avoids writing the raw
+path into the storage key but is not encryption or a security boundary. A
+bookmark does not retain a page object or image.
+
+The dark/light theme preference is stored locally in the WebView. It changes
+CSS presentation only and does not alter PDF rendering, worker state, or
+document contents.
+
+Text search is implemented in the PDFium worker on its single owner thread.
+The host sends a bounded SEARCH frame and validates the correlated
+SEARCH_RESULTS frame before returning small JSON metadata to the frontend.
+The worker scans pages serially, returns at most 250 results with excerpts no
+longer than 128 UTF-8 bytes, and rejects queries above 512 UTF-8 bytes. The
+host applies a 30-second search deadline; a timeout follows worker
+termination/reap recovery. Search result sequence, document ID, and generation
+checks discard late results. Search cannot interrupt an in-progress native
+PDFium call. Image-only/scanned pages have no searchable text unless a PDF
+already contains an OCR text layer; OCR is not implemented.
+
+Automated tests cover page entry, bookmark save/list/navigation, theme
+preference, worker search framing and fixture results, malformed search
+metadata, and stale document results. The desktop WebView2 appearance and
+manual feature behavior remain to be confirmed. No memory or performance
+improvement is claimed.

@@ -15,8 +15,16 @@
           <button id="close-button" class="button" type="button" disabled>Close</button>
           <span class="toolbar-divider" aria-hidden="true"></span>
           <button id="previous-button" class="button button-square" type="button" aria-label="Previous page" disabled>‹</button>
-          <span id="page-counter" class="page-counter">— / —</span>
+          <label class="page-jump"><span class="sr-only">Go to page</span><input id="page-number" class="page-number-input" type="number" min="1" step="1" value="1" aria-label="Page number" disabled /><span id="page-total">/ —</span></label>
           <button id="next-button" class="button button-square" type="button" aria-label="Next page" disabled>›</button>
+          <button id="bookmark-current" class="button button-square bookmark-current" type="button" aria-label="Bookmark current page" title="Bookmark current page" disabled>☆</button>
+          <button id="bookmarks-toggle" class="button" type="button" aria-expanded="false" aria-controls="bookmarks-panel" disabled>Bookmarks</button>
+          <form id="search-form" class="search-control" role="search">
+            <label class="sr-only" for="search-input">Search text in this PDF</label>
+            <input id="search-input" class="search-input" type="search" placeholder="Find in PDF" autocomplete="off" disabled />
+            <button id="search-button" class="button" type="submit" disabled>Find</button>
+          </form>
+          <button id="theme-toggle" class="button theme-toggle" type="button" aria-label="Switch to light theme" aria-pressed="false" title="Switch theme">☀</button>
         </div>
       </header>
       <section class="document-bar">
@@ -28,6 +36,17 @@
         <div id="empty-state" class="empty-state"><span class="empty-icon" aria-hidden="true">▤</span><h2>Open a document</h2><p>Select a local PDF to view its pages.</p></div>
         <div id="loading-state" class="loading-state" hidden><span class="spinner" aria-hidden="true"></span><span>Rendering page…</span></div>
         <div id="page-stack" class="page-stack" hidden><img id="page-image" alt="Rendered PDF page" hidden /></div>
+        <aside id="search-panel" class="side-panel" aria-labelledby="search-panel-title" hidden>
+          <div class="side-panel-heading"><h2 id="search-panel-title">Search results</h2><button id="search-panel-close" class="icon-button" type="button" aria-label="Close search results">×</button></div>
+          <div class="search-options"><label><input id="search-match-case" type="checkbox" /> Match case</label><label><input id="search-whole-word" type="checkbox" /> Whole word</label></div>
+          <p id="search-summary" role="status" aria-live="polite"></p>
+          <ol id="search-results" class="result-list"></ol>
+        </aside>
+        <aside id="bookmarks-panel" class="side-panel" aria-labelledby="bookmarks-panel-title" hidden>
+          <div class="side-panel-heading"><h2 id="bookmarks-panel-title">Bookmarks</h2><button id="bookmarks-panel-close" class="icon-button" type="button" aria-label="Close bookmarks">×</button></div>
+          <p id="bookmarks-empty" class="panel-empty">No bookmarks yet.</p>
+          <ul id="bookmark-list" class="bookmark-list"></ul>
+        </aside>
         <div id="error-state" class="error-state" role="alert" hidden></div>
       </section>
       <footer class="footer"><span>One active PDFium document</span><span id="page-size"></span></footer>

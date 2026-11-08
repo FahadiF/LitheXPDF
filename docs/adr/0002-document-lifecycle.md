@@ -9,6 +9,14 @@ tab metadata; the lifecycle below remains the design constraint for later tab
 work. Repeated worker open/close behavior has a 50-cycle functional test, but
 no native-memory or working-set conclusion has been measured.
 
+The current single-document UI also stores bookmarks separately from the
+native document lifecycle: only page numbers and labels are persisted in the
+WebView's local storage, under a key derived from the normalized path. Theme
+preference is local UI state. Neither persists PDF content or page images.
+Text search is performed by the active worker document on its owner thread;
+search replies carry the active tab identity and generation and are discarded
+when the document changes.
+
 ## Context
 
 The application targets 30 or more open tabs. Keeping every PDFium document

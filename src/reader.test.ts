@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseRenderResponse, PdfReaderUi, type ReaderBridge } from "./reader";
+import { LocalBookmarkStore, type Bookmark, type BookmarkStore } from "./bookmarks";
+import { installThemeToggle } from "./theme";
 
 const stylesheet = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
 
@@ -44,7 +46,28 @@ describe("bounded render response parsing", () => {
 describe("reader image lifecycle", () => {
   beforeEach(() => {
     document.head.innerHTML = `<style>${stylesheet}</style>`;
-    document.body.innerHTML = `<main><button id="open-button"></button><button id="close-button"></button><button id="previous-button"></button><button id="next-button"></button><span id="page-counter"></span><span id="document-name"></span><span id="status-text"></span><span id="page-size"></span><section id="viewer"><div id="loading-state" class="loading-state" hidden></div><div id="page-stack" class="page-stack" hidden><img id="page-image" hidden></div><div id="empty-state" class="empty-state"></div><div id="error-state" class="error-state" hidden></div></section></main>`;
+    const storageValues = new Map<string, string>();
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => storageValues.get(key) ?? null,
+        setItem: (key: string, value: string) => { storageValues.set(key, value); },
+        removeItem: (key: string) => { storageValues.delete(key); },
+        clear: () => storageValues.clear(),
+        key: (index: number) => [...storageValues.keys()][index] ?? null,
+        get length() { return storageValues.size; },
+      } as Storage,
+    });
+    document.body.innerHTML = `<main>
+      <button id="open-button"></button><button id="close-button"></button><button id="previous-button"></button><button id="next-button"></button>
+      <input id="page-number" type="number"/><span id="page-total"></span><span id="document-name"></span><span id="status-text"></span><span id="page-size"></span>
+      <button id="bookmark-current"></button><button id="bookmarks-toggle"></button><button id="bookmarks-panel-close"></button>
+      <aside id="bookmarks-panel" hidden><p id="bookmarks-empty"></p><ul id="bookmark-list"></ul></aside>
+      <form id="search-form"><input id="search-input"/><button id="search-button"></button></form>
+      <input id="search-match-case" type="checkbox"/><input id="search-whole-word" type="checkbox"/>
+      <aside id="search-panel" hidden><button id="search-panel-close"></button><p id="search-summary"></p><ol id="search-results"></ol></aside>
+      <button id="theme-toggle"></button>
+      <section id="viewer"><div id="loading-state" class="loading-state" hidden></div><div id="page-stack" class="page-stack" hidden><img id="page-image" hidden></div><div id="empty-state" class="empty-state"></div><div id="error-state" class="error-state" hidden></div></section></main>`;
   });
 
   it("starts with the loading indicator and page image hidden", () => {
@@ -133,7 +156,8 @@ describe("reader image lifecycle", () => {
       await vi.advanceTimersByTimeAsync(100);
       await Promise.resolve();
       expect(bridge.invoke).toHaveBeenCalledWith("render_page", expect.objectContaining({ pageIndex: 1 }));
-      expect(document.querySelector("#page-counter")?.textContent).toBe("2 / 3");
+      expect(document.querySelector<HTMLInputElement>("#page-number")?.value).toBe("2");
+      expect(document.querySelector("#page-total")?.textContent).toBe("/ 3");
     } finally {
       vi.useRealTimers();
     }
@@ -161,7 +185,8 @@ describe("reader image lifecycle", () => {
     expect(image.closest<HTMLElement>(".page-slot")?.dataset.pageIndex).toBe("0");
     for (let pageIndex = 1; pageIndex < 7; pageIndex++) {
       next.click();
-      expect(document.querySelector("#page-counter")?.textContent).toBe(`${pageIndex + 1} / 7`);
+      expect(document.querySelector<HTMLInputElement>("#page-number")?.value).toBe(String(pageIndex + 1));
+      expect(document.querySelector("#page-total")?.textContent).toBe("/ 7");
       await Promise.resolve();
       expect(document.querySelectorAll("img")).toHaveLength(1);
       expect(image.closest<HTMLElement>(".page-slot")?.dataset.pageIndex).toBe(String(pageIndex));
@@ -192,5 +217,182 @@ describe("reader image lifecycle", () => {
     expect(slot?.style.aspectRatio).toBe("300 / 600");
     expect(stylesheet).toMatch(/#page-image\s*\{[^}]*width:\s*100%[^}]*height:\s*auto/s);
     await ui.close();
+  });
+
+  it("jumps to a typed page number and rejects values outside the document", async () => {
+    const bridge: ReaderBridge = {
+      pickPdf: async () => null,
+      invoke: vi.fn(async (command: string, args?: Record<string, unknown>) => {
+        if (command === "open_pdf") return { document_id: id, generation: 7, page_count: 7, page_width_points: 612, page_height_points: 792 } as never;
+        if (command === "render_page") return pageFrame(Number(args?.pageIndex ?? 0)) as never;
+        return undefined as never;
+      }),
+      createObjectURL: () => "blob:jump",
+      revokeObjectURL: vi.fn(),
+    };
+    const ui = new PdfReaderUi(document, bridge);
+    await ui.open("C:\\jump.pdf");
+    const input = document.querySelector<HTMLInputElement>("#page-number")!;
+    input.value = "6";
+    input.dispatchEvent(new Event("change"));
+    await Promise.resolve();
+    expect(bridge.invoke).toHaveBeenCalledWith("render_page", expect.objectContaining({ pageIndex: 5 }));
+    expect(input.value).toBe("6");
+    input.value = "8";
+    input.dispatchEvent(new Event("change"));
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    await ui.close();
+  });
+
+  it("persists bookmarks for a document and jumps from its bookmark list", async () => {
+    const saved = new Map<string, Bookmark[]>();
+    const bookmarks: BookmarkStore = {
+      load: async (path) => saved.get(path) ?? [],
+      save: async (path, value) => { saved.set(path, value); },
+    };
+    const bridge: ReaderBridge = {
+      pickPdf: async () => null,
+      bookmarks,
+      invoke: vi.fn(async (command: string, args?: Record<string, unknown>) => {
+        if (command === "open_pdf") return { document_id: id, generation: 7, page_count: 4, page_width_points: 612, page_height_points: 792 } as never;
+        if (command === "render_page") return pageFrame(Number(args?.pageIndex ?? 0)) as never;
+        return undefined as never;
+      }),
+      createObjectURL: () => "blob:bookmark",
+      revokeObjectURL: vi.fn(),
+    };
+    const ui = new PdfReaderUi(document, bridge);
+    await ui.open("C:\\bookmarked.pdf");
+    document.querySelector<HTMLButtonElement>("#next-button")!.click();
+    await Promise.resolve();
+    document.querySelector<HTMLButtonElement>("#bookmark-current")!.click();
+    await Promise.resolve();
+    expect(saved.get("C:\\bookmarked.pdf")).toEqual([{ pageNumber: 2, label: "Page 2" }]);
+    await ui.close();
+    await ui.open("C:\\bookmarked.pdf");
+    document.querySelector<HTMLButtonElement>("#bookmarks-toggle")!.click();
+    const bookmarkButton = document.querySelector<HTMLButtonElement>(".bookmark-open")!;
+    bookmarkButton.click();
+    await Promise.resolve();
+    expect(bridge.invoke).toHaveBeenCalledWith("render_page", expect.objectContaining({ pageIndex: 1 }));
+    expect(document.querySelector<HTMLElement>("#bookmarks-panel")!.hidden).toBe(true);
+    document.querySelector<HTMLButtonElement>("#bookmarks-toggle")!.click();
+    document.querySelector<HTMLButtonElement>(".bookmark-remove")!.click();
+    await Promise.resolve();
+    expect(saved.get("C:\\bookmarked.pdf")).toEqual([]);
+    expect(document.querySelectorAll(".bookmark-open")).toHaveLength(0);
+    await ui.close();
+  });
+
+  it("searches through the worker bridge and jumps from a text result", async () => {
+    const bridge: ReaderBridge = {
+      pickPdf: async () => null,
+      invoke: vi.fn(async (command: string, args?: Record<string, unknown>) => {
+        if (command === "open_pdf") return { document_id: id, generation: 7, page_count: 3, page_width_points: 612, page_height_points: 792 } as never;
+        if (command === "render_page") return pageFrame(Number(args?.pageIndex ?? 0)) as never;
+        if (command === "search_text") return { matches: [{ page_index: 2, text: "LitheXPDF search fixture" }], truncated: false } as never;
+        return undefined as never;
+      }),
+      createObjectURL: () => "blob:search",
+      revokeObjectURL: vi.fn(),
+    };
+    const ui = new PdfReaderUi(document, bridge);
+    await ui.open("C:\\search.pdf");
+    const input = document.querySelector<HTMLInputElement>("#search-input")!;
+    input.value = "LitheXPDF";
+    document.querySelector<HTMLInputElement>("#search-match-case")!.checked = true;
+    document.querySelector<HTMLFormElement>("#search-form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(bridge.invoke).toHaveBeenCalledWith("search_text", expect.objectContaining({ query: "LitheXPDF", matchCase: true }));
+    expect(document.querySelector("#search-summary")?.textContent).toContain("1 match");
+    document.querySelector<HTMLButtonElement>("#search-results button")!.click();
+    await Promise.resolve();
+    expect(bridge.invoke).toHaveBeenCalledWith("render_page", expect.objectContaining({ pageIndex: 2 }));
+    await ui.close();
+  });
+
+  it("rejects a search result page outside the active document", async () => {
+    const bridge: ReaderBridge = {
+      pickPdf: async () => null,
+      invoke: vi.fn(async (command: string, args?: Record<string, unknown>) => {
+        if (command === "open_pdf") return { document_id: id, generation: 7, page_count: 2, page_width_points: 612, page_height_points: 792 } as never;
+        if (command === "render_page") return pageFrame(Number(args?.pageIndex ?? 0)) as never;
+        if (command === "search_text") return { matches: [{ page_index: 2, text: "outside document" }], truncated: false } as never;
+        return undefined as never;
+      }),
+      createObjectURL: () => "blob:search-invalid",
+      revokeObjectURL: vi.fn(),
+    };
+    const ui = new PdfReaderUi(document, bridge);
+    await ui.open("C:\\invalid-search.pdf");
+    const input = document.querySelector<HTMLInputElement>("#search-input")!;
+    input.value = "outside";
+    document.querySelector<HTMLFormElement>("#search-form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await Promise.resolve(); await Promise.resolve();
+    expect(document.querySelector("#search-summary")?.textContent).toContain("invalid search result entry");
+    expect(document.querySelector("#search-results")?.textContent).toBe("");
+    await ui.close();
+  });
+
+  it("ignores a search response after the document generation changes", async () => {
+    let resolveSearch!: (value: { matches: { page_index: number; text: string }[]; truncated: boolean }) => void;
+    let opens = 0;
+    const bridge: ReaderBridge = {
+      pickPdf: async () => null,
+      invoke: vi.fn(async (command: string, args?: Record<string, unknown>) => {
+        if (command === "open_pdf") {
+          opens++;
+          return { document_id: opens === 1 ? id : "ffeeddccbbaa99887766554433221100", generation: opens + 6, page_count: 2, page_width_points: 612, page_height_points: 792 } as never;
+        }
+        if (command === "render_page") return pageFrame(Number(args?.pageIndex ?? 0), Number(args?.generation ?? 7), undefined, String(args?.documentId ?? id)) as never;
+        if (command === "search_text") return await new Promise<{ matches: { page_index: number; text: string }[]; truncated: boolean }>((resolve) => { resolveSearch = resolve; }) as never;
+        return undefined as never;
+      }),
+      createObjectURL: () => `blob:stale-${opens}`,
+      revokeObjectURL: vi.fn(),
+    };
+    const ui = new PdfReaderUi(document, bridge);
+    await ui.open("C:\\old.pdf");
+    const input = document.querySelector<HTMLInputElement>("#search-input")!;
+    input.value = "old query";
+    document.querySelector<HTMLFormElement>("#search-form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await Promise.resolve();
+    await ui.open("C:\\new.pdf");
+    resolveSearch({ matches: [{ page_index: 1, text: "old result" }], truncated: false });
+    await Promise.resolve(); await Promise.resolve();
+    expect(document.querySelector("#search-results")?.textContent).not.toContain("old result");
+    await ui.close();
+  });
+});
+
+describe("theme preference", () => {
+  it("restores, toggles, and persists the selected theme", () => {
+    document.body.innerHTML = `<button id="theme-toggle"></button>`;
+    const values = new Map<string, string>([["lithexpdf.theme", "light"]]);
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value); },
+    } as unknown as Storage;
+    installThemeToggle(document.documentElement, storage);
+    expect(document.documentElement.dataset.theme).toBe("light");
+    document.querySelector<HTMLButtonElement>("#theme-toggle")!.click();
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(values.get("lithexpdf.theme")).toBe("dark");
+  });
+
+  it("stores document bookmarks under a path-derived key without storing the path", async () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value); },
+    } as unknown as Storage;
+    const store = new LocalBookmarkStore(storage);
+    await store.save("C:\\Documents\\Research.pdf", [{ pageNumber: 9, label: "Page 9" }]);
+    const [key, value] = [...values.entries()][0];
+    expect(key).toMatch(/^lithexpdf\.bookmarks\.[a-f0-9]{64}$/);
+    expect(key).not.toContain("Research");
+    expect(JSON.parse(value)).toEqual([{ pageNumber: 9, label: "Page 9" }]);
+    expect(await store.load("c:/documents/research.PDF")).toEqual([{ pageNumber: 9, label: "Page 9" }]);
   });
 });

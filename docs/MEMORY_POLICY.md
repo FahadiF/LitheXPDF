@@ -40,6 +40,8 @@ must be tuned using the benchmark corpus:
 | Decoded WebView images | 1 page, at most 32 MiB RGBA dimensions | Clear `src`, remove element/references, revoke URL on replacement/deactivation |
 | IPC control/request payload | 64 KiB per frame | Reject before allocation |
 | IPC image-result payload | 32 MiB image bytes + at most 4 KiB metadata | Reject malformed/oversized frame and restart worker |
+| Search query payload | 512 UTF-8 bytes plus fixed request metadata | Reject before dispatch |
+| Search result metadata | 250 matches × at most 128 UTF-8 bytes per excerpt; response stays under 64 KiB | Truncate at 250 results and mark truncated |
 | Temporary encoding output buffer | 32 MiB | Bounded writer aborts at cap; discard partial output |
 | Encoder scratch allocations | 8 MiB initial measurement target | Measure in worker; compatibility milestone must validate encoder behavior |
 | Concurrent result payloads awaiting UI | 1 | Backpressure worker/host until consumed or invalidated |
@@ -96,3 +98,11 @@ did not provide a bounded object-URL lifecycle. The current one-image design
 remains the active implementation. Any future virtualization work must retain
 the full scroll extent and prove bounded image cleanup with tests; it must not
 be described as a memory improvement until measured.
+
+Text search runs serially in the PDFium worker and returns at most 250 result
+rows. The query is capped at 512 UTF-8 bytes and each excerpt at 128 UTF-8
+bytes; a larger result set is truncated. This bounds the protocol response and
+frontend result list, but does not hard-bound PDFium's internal text extraction
+or allocations for a page. Search timeout terminates and reaps the worker if
+the operation exceeds its deadline. Bookmarks and theme preference are small
+localStorage metadata; they never retain rendered images or PDF contents.

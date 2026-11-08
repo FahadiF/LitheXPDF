@@ -1,6 +1,7 @@
 use pdfium_protocol::{
-    encode, read_u32, read_u64, validate_bitmap, Decoder, Frame, Kind, MAX_IMAGE_BYTES,
-    MAX_RESULT_METADATA, OPEN_ACK_LEN,
+    encode, read_u16, read_u32, read_u64, validate_bitmap, Decoder, Frame, Kind, MAX_IMAGE_BYTES,
+    MAX_RESULT_METADATA, MAX_SEARCH_EXCERPT_BYTES, MAX_SEARCH_QUERY_BYTES, MAX_SEARCH_RESULTS,
+    OPEN_ACK_LEN,
 };
 use serde::Serialize;
 use std::{
@@ -22,6 +23,7 @@ use tokio::sync::{oneshot, Mutex, Notify, Semaphore};
 const RENDER_TIMEOUT_DEFAULT_MS: u64 = 30_000;
 const SHUTDOWN_GRACE: Duration = Duration::from_millis(2_000);
 const MAX_RESTARTS: u8 = 3;
+const SEARCH_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Clone)]
 pub struct AppState(Arc<Supervisor>);
@@ -56,6 +58,18 @@ pub struct OpenDocumentResult {
     pub page_count: u32,
     pub page_width_points: f64,
     pub page_height_points: f64,
+}
+
+#[derive(Serialize)]
+pub struct TextMatch {
+    pub page_index: u32,
+    pub text: String,
+}
+
+#[derive(Serialize)]
+pub struct TextSearchResult {
+    pub matches: Vec<TextMatch>,
+    pub truncated: bool,
 }
 
 struct Connection {
@@ -353,6 +367,67 @@ impl AppState {
             return Err("Document changed while rendering; result discarded".into());
         }
         encode(&reply).map_err(|e| format!("could not encode bounded IPC response: {e}"))
+    }
+
+    pub async fn search_text(
+        &self,
+        id: String,
+        generation: u64,
+        query: String,
+        match_case: bool,
+        whole_word: bool,
+    ) -> Result<TextSearchResult, String> {
+        if query.trim().is_empty() {
+            return Err("Enter text to search for".into());
+        }
+        if query.len() > MAX_SEARCH_QUERY_BYTES {
+            return Err(format!(
+                "Search text must be at most {MAX_SEARCH_QUERY_BYTES} UTF-8 bytes"
+            ));
+        }
+        let _operation = self.0.operation.lock().await;
+        let active = self.0.active.lock().await.clone().ok_or("No PDF is open")?;
+        if !active_document_matches(Some(&active), &id, generation) {
+            return Err("Document changed; search request is stale".into());
+        }
+        let mut payload = Vec::with_capacity(27 + query.len());
+        payload.extend_from_slice(&active.tab);
+        payload.extend_from_slice(&generation.to_be_bytes());
+        payload.push(u8::from(match_case) | (u8::from(whole_word) << 1));
+        payload.extend_from_slice(&(query.len() as u16).to_be_bytes());
+        payload.extend_from_slice(query.as_bytes());
+
+        let conn = self.connection().await?;
+        let reply = match conn
+            .request(self.request(Kind::Search, payload)?, SEARCH_TIMEOUT)
+            .await
+        {
+            Ok(reply) => reply,
+            Err(error) => {
+                if !conn.alive.load(Ordering::SeqCst) {
+                    self.0.active.lock().await.take();
+                }
+                return Err(error);
+            }
+        };
+        if reply.kind != Kind::SearchResults {
+            conn.fail("worker returned an unexpected SEARCH reply kind".into())
+                .await;
+            return Err("Worker returned an invalid search response kind".into());
+        }
+        let result =
+            match parse_search_results(&reply.payload, active.tab, generation, active.page_count) {
+                Ok(result) => result,
+                Err(error) => {
+                    conn.fail(format!("malformed SEARCH_RESULTS response: {error}"))
+                        .await;
+                    return Err("Worker returned malformed search results".into());
+                }
+            };
+        if !active_document_matches(self.0.active.lock().await.as_ref(), &id, generation) {
+            return Err("Document changed while searching; results discarded".into());
+        }
+        Ok(result)
     }
 
     pub async fn cancel_render(&self, request_token: String) -> bool {
@@ -719,10 +794,71 @@ impl Connection {
     }
 }
 
+fn parse_search_results(
+    payload: &[u8],
+    expected_tab: [u8; 16],
+    expected_generation: u64,
+    page_count: u32,
+) -> Result<TextSearchResult, String> {
+    const METADATA_LEN: usize = 28;
+    if payload.len() < METADATA_LEN || payload.len() > pdfium_protocol::MAX_CONTROL_PAYLOAD {
+        return Err("invalid payload size".into());
+    }
+    let tab: [u8; 16] = payload[..16]
+        .try_into()
+        .map_err(|_| "invalid tab identifier")?;
+    let generation = read_u64(payload, 16).map_err(|error| error.to_string())?;
+    let count = read_u16(payload, 24).map_err(|error| error.to_string())? as usize;
+    let truncated = payload[26];
+    if tab != expected_tab
+        || generation != expected_generation
+        || count > MAX_SEARCH_RESULTS
+        || truncated > 1
+        || payload[27] != 0
+    {
+        return Err("identity, count, flags, or reserved field is invalid".into());
+    }
+
+    let mut matches = Vec::with_capacity(count);
+    let mut offset = METADATA_LEN;
+    let mut previous_page = 0;
+    for index in 0..count {
+        let page_index = read_u32(payload, offset).map_err(|error| error.to_string())?;
+        let text_len = read_u16(payload, offset + 4).map_err(|error| error.to_string())? as usize;
+        offset = offset
+            .checked_add(6)
+            .ok_or("search result offset overflow")?;
+        if page_index >= page_count
+            || (index > 0 && page_index < previous_page)
+            || text_len == 0
+            || text_len > MAX_SEARCH_EXCERPT_BYTES
+        {
+            return Err("result page order or excerpt length is invalid".into());
+        }
+        let end = offset
+            .checked_add(text_len)
+            .ok_or("search excerpt length overflow")?;
+        let text = std::str::from_utf8(payload.get(offset..end).ok_or("truncated search excerpt")?)
+            .map_err(|_| "search excerpt is not UTF-8")?
+            .to_string();
+        matches.push(TextMatch { page_index, text });
+        offset = end;
+        previous_page = page_index;
+    }
+    if offset != payload.len() {
+        return Err("trailing bytes after search results".into());
+    }
+    Ok(TextSearchResult {
+        matches,
+        truncated: truncated != 0,
+    })
+}
+
 fn expected_reply(kind: Kind) -> Option<Kind> {
     match kind {
         Kind::Open | Kind::Close | Kind::Shutdown => Some(Kind::Ack),
         Kind::Render => Some(Kind::Page),
+        Kind::Search => Some(Kind::SearchResults),
         _ => None,
     }
 }
@@ -815,9 +951,9 @@ fn validate_local_pdf(path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        active_document_matches, expected_reply, parse_document_id, render_timeout, reply_matches,
-        ActiveDocument, Connection, PendingRequest, ProcessControl, ReapGate, RestartBudget,
-        MAX_RESTARTS,
+        active_document_matches, expected_reply, parse_document_id, parse_search_results,
+        render_timeout, reply_matches, ActiveDocument, Connection, PendingRequest, ProcessControl,
+        ReapGate, RestartBudget, MAX_RESTARTS,
     };
     use pdfium_protocol::{Frame, Kind};
     use std::collections::HashMap;
@@ -876,8 +1012,49 @@ mod tests {
     fn only_acknowledged_protocol_shapes_are_correlated() {
         assert_eq!(expected_reply(Kind::Open), Some(Kind::Ack));
         assert_eq!(expected_reply(Kind::Render), Some(Kind::Page));
+        assert_eq!(expected_reply(Kind::Search), Some(Kind::SearchResults));
         assert_eq!(expected_reply(Kind::Shutdown), Some(Kind::Ack));
         assert_eq!(expected_reply(Kind::Ready), None);
+    }
+
+    fn encoded_search_result(tab: [u8; 16], generation: u64, page_index: u32) -> Vec<u8> {
+        let excerpt = "LitheXPDF".as_bytes();
+        let mut payload = tab.to_vec();
+        payload.extend_from_slice(&generation.to_be_bytes());
+        payload.extend_from_slice(&1u16.to_be_bytes());
+        payload.push(0);
+        payload.push(0);
+        payload.extend_from_slice(&page_index.to_be_bytes());
+        payload.extend_from_slice(&(excerpt.len() as u16).to_be_bytes());
+        payload.extend_from_slice(excerpt);
+        payload
+    }
+
+    #[test]
+    fn search_result_parser_accepts_bounded_match_and_rejects_malformed_entries() {
+        let tab = [0x44; 16];
+        let valid = encoded_search_result(tab, 9, 1);
+        let parsed = parse_search_results(&valid, tab, 9, 2).unwrap();
+        assert_eq!(parsed.matches.len(), 1);
+        assert_eq!(parsed.matches[0].page_index, 1);
+        assert_eq!(parsed.matches[0].text, "LitheXPDF");
+        assert!(!parsed.truncated);
+
+        let mut wrong_identity = valid.clone();
+        wrong_identity[16] = 8;
+        assert!(parse_search_results(&wrong_identity, tab, 9, 2).is_err());
+        let mut invalid_page = valid.clone();
+        invalid_page[31] = 2;
+        assert!(parse_search_results(&invalid_page, tab, 9, 2).is_err());
+        let mut invalid_length = valid.clone();
+        invalid_length[32..34].copy_from_slice(&129u16.to_be_bytes());
+        assert!(parse_search_results(&invalid_length, tab, 9, 2).is_err());
+        let mut truncated_excerpt = valid.clone();
+        truncated_excerpt.pop();
+        assert!(parse_search_results(&truncated_excerpt, tab, 9, 2).is_err());
+        let mut trailing = valid;
+        trailing.push(0);
+        assert!(parse_search_results(&trailing, tab, 9, 2).is_err());
     }
 
     #[test]

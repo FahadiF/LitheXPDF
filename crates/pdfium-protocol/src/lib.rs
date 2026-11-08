@@ -10,6 +10,9 @@ pub const MAX_RESULT_PAYLOAD: usize = MAX_IMAGE_BYTES + MAX_RESULT_METADATA;
 pub const MAX_BITMAP_DIMENSION: u32 = 8_192;
 pub const MAX_BITMAP_PIXELS: u64 = 8_388_608;
 pub const MAX_RGBA_BYTES: u64 = 32 * 1024 * 1024;
+pub const MAX_SEARCH_QUERY_BYTES: usize = 512;
+pub const MAX_SEARCH_RESULTS: usize = 250;
+pub const MAX_SEARCH_EXCERPT_BYTES: usize = 128;
 pub const OPEN_ACK_LEN: usize = 44;
 pub const PAGE_METADATA_LEN: usize = 42;
 
@@ -20,9 +23,11 @@ pub enum Kind {
     Render = 0x0002,
     Close = 0x0003,
     Shutdown = 0x0004,
+    Search = 0x0005,
     Ready = 0x8001,
     Ack = 0x8002,
     Page = 0x8003,
+    SearchResults = 0x8004,
     Error = 0x80ff,
 }
 
@@ -34,9 +39,11 @@ impl TryFrom<u16> for Kind {
             0x0002 => Ok(Self::Render),
             0x0003 => Ok(Self::Close),
             0x0004 => Ok(Self::Shutdown),
+            0x0005 => Ok(Self::Search),
             0x8001 => Ok(Self::Ready),
             0x8002 => Ok(Self::Ack),
             0x8003 => Ok(Self::Page),
+            0x8004 => Ok(Self::SearchResults),
             0x80ff => Ok(Self::Error),
             _ => Err(ProtocolError::UnknownKind(value)),
         }
@@ -244,6 +251,16 @@ pub fn read_u32(bytes: &[u8], at: usize) -> Result<u32, ProtocolError> {
             .map_err(|_| ProtocolError::InvalidPayload("missing u32"))?,
     ))
 }
+pub fn read_u16(bytes: &[u8], at: usize) -> Result<u16, ProtocolError> {
+    let end = at.checked_add(2).ok_or(ProtocolError::LengthOverflow)?;
+    Ok(u16::from_be_bytes(
+        bytes
+            .get(at..end)
+            .ok_or(ProtocolError::InvalidPayload("missing u16"))?
+            .try_into()
+            .map_err(|_| ProtocolError::InvalidPayload("missing u16"))?,
+    ))
+}
 pub fn read_u64(bytes: &[u8], at: usize) -> Result<u64, ProtocolError> {
     let end = at.checked_add(8).ok_or(ProtocolError::LengthOverflow)?;
     Ok(u64::from_be_bytes(
@@ -306,6 +323,28 @@ mod tests {
             vec![frame(Kind::Ready, 0, &[]), frame(Kind::Ack, 9, b"ok")]
         );
         decoder.finish().unwrap();
+    }
+
+    #[test]
+    fn recognizes_bounded_search_request_and_response_kinds() {
+        let query = b"LitheXPDF";
+        let mut payload = vec![0x44; 16];
+        payload.extend_from_slice(&3u64.to_be_bytes());
+        payload.push(0b01);
+        payload.extend_from_slice(&(query.len() as u16).to_be_bytes());
+        payload.extend_from_slice(query);
+        let request = encode(&frame(Kind::Search, 17, &payload)).unwrap();
+        let mut decoder = Decoder::new();
+        assert_eq!(
+            decoder.push(&request).unwrap(),
+            vec![frame(Kind::Search, 17, &payload)]
+        );
+        let response = encode(&frame(Kind::SearchResults, 17, &[0; 28])).unwrap();
+        assert_eq!(
+            Decoder::new().push(&response).unwrap(),
+            vec![frame(Kind::SearchResults, 17, &[0; 28])]
+        );
+        assert!(encode(&frame(Kind::Search, 18, &vec![0; MAX_CONTROL_PAYLOAD + 1])).is_err());
     }
 
     #[test]

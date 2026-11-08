@@ -1,7 +1,7 @@
 mod supervisor;
 
 use std::path::PathBuf;
-use supervisor::{AppState, OpenDocumentResult};
+use supervisor::{AppState, OpenDocumentResult, TextSearchResult};
 use tauri::{Manager, RunEvent};
 
 #[tauri::command]
@@ -36,6 +36,20 @@ async fn render_page(
         )
         .await
         .map(tauri::ipc::Response::new)
+}
+
+#[tauri::command]
+async fn search_text(
+    state: tauri::State<'_, AppState>,
+    document_id: String,
+    generation: u64,
+    query: String,
+    match_case: bool,
+    whole_word: bool,
+) -> Result<TextSearchResult, String> {
+    state
+        .search_text(document_id, generation, query, match_case, whole_word)
+        .await
 }
 
 #[tauri::command]
@@ -80,6 +94,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             open_pdf,
             render_page,
+            search_text,
             cancel_render,
             close_pdf
         ])

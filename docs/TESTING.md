@@ -39,11 +39,13 @@ lifecycle. Automated tests do not replace manual WebView2 testing.
 
 ### Frontend follow-up — 2026-11-08
 
-The five-slot page-DOM experiment was reverted after it limited navigation to
-the slot window, shortened the document's scroll extent, and failed the
-existing image-lifecycle test. The current reader keeps lightweight slots for
-all pages and moves one shared image between them. This restores full-document
-navigation; it is not DOM virtualization and no memory improvement is claimed.
+At that point in the project history, placeholder search, annotation, and theme
+controls had been removed pending real implementations. The five-slot page-DOM
+experiment was reverted after it limited navigation to the slot window,
+shortened the document's scroll extent, and failed the existing image-lifecycle
+test. The current reader keeps lightweight slots for all pages and moves one
+shared image between them. This restores full-document navigation; it is not
+DOM virtualization and no memory improvement is claimed.
 
 After removing nonfunctional search, annotation, and theme controls and adding
 long-document navigation, URL-cleanup, and mixed-page-aspect-ratio tests,
@@ -54,9 +56,10 @@ measured in this follow-up.
 
 ## Manual desktop validation
 
-An earlier manual run opened a multi-page PDF and displayed a page. The latest
-scroll and aspect-ratio corrections still need verification in the desktop
-WebView2 window.
+The user reports that a 115-page PDF opened and rendered in an earlier manual
+run. That check predates the latest toolbar, search, bookmark, and theme
+changes. The current changes still need verification in the desktop WebView2
+window.
 
 - [ ] Open `crates/pdfium-worker/tests/fixtures/smoke-two-page.pdf`; confirm
       page 1 has the correct proportions and the loading indicator clears.
@@ -91,3 +94,61 @@ geometry and pass navigation tests beyond its recycled slot window.
 
 Do not treat the project as release-ready until the manual checks,
 compatibility gates, and clean-machine packaging checks pass.
+
+### Page jump, bookmarks, search, and theme — 2026-11-08
+
+The toolbar now has a validated one-based page-number field between Previous
+and Next. Bookmarks can be added to the current page, listed, opened, and
+removed; the current implementation persists page numbers and labels in
+WebView local storage under a SHA-256-derived key for the normalized file path.
+The key hash is not encryption. Text search runs through the host and worker,
+supports case-sensitive and whole-word options, displays up to 250 bounded
+matches, and navigates to a matching page. It does not highlight text in the
+rendered bitmap and does not OCR image-only pages. The theme toggle persists a
+dark or light UI preference locally.
+
+Checks run from the repository root after these changes:
+
+| Command | Result |
+| --- | --- |
+| `cargo fmt --all` | Passed, exit 0 |
+| `pnpm typecheck` | Passed, exit 0 |
+| `pnpm test` | Passed, 16 tests, exit 0 |
+| `pnpm build` | Passed, Vite production build, exit 0 |
+| `cargo check --workspace --all-targets` | Passed, exit 0 |
+| `cargo test --workspace` | Passed, 34 tests across host, protocol, worker, PDFium smoke, and worker protocol suites; exit 0 |
+| `git diff --check` | Passed, exit 0; Git printed line-ending conversion warnings for edited files |
+
+The real worker protocol test used the repository's two-page text fixture and
+the locally selected PDFium DLL. It verified matches on both pages, case
+sensitivity, whole-word matching, result bounds, and request correlation.
+Frontend tests cover page-number bounds, bookmark persistence/navigation,
+theme persistence, search response validation and navigation, stale search
+rejection, existing long-document page navigation, and image URL cleanup.
+These are automated checks; they do not confirm that the controls look or work
+correctly in the actual Tauri WebView2 window.
+
+Manual checks still needed in `pnpm tauri dev`:
+
+- [ ] Enter page 1, a middle page, and the last page in the toolbar. Confirm
+      Enter and field change navigate immediately, and 0/out-of-range values
+      are rejected without changing the displayed page.
+- [ ] Add a bookmark, navigate away, open the bookmark, remove it, and reopen
+      the same PDF to confirm it persists. Open a different PDF and confirm its
+      bookmarks are separate.
+- [ ] Search a known phrase in a text PDF; test case and whole-word options,
+      no-result behavior, and clicking a result. Confirm the target page loads.
+      Test a scanned PDF and confirm the UI explains that no text layer was
+      found.
+- [ ] Toggle light/dark mode, close and relaunch the app, and confirm the
+      selected theme persists.
+- [ ] Repeat navigation and search in the user's 115-page PDF; confirm the
+      page field tracks scrolling and no result from a previous document
+      replaces the current page.
+
+Search is serialized with other PDFium operations on the single worker thread.
+The 30-second deadline bounds the host wait by terminating and reaping the
+worker on timeout; it does not cancel PDFium in place. The PDFium runtime/API
+compatibility caveat, packaged execution, clean-machine dependencies, memory
+measurements, and performance benchmarks remain open. No memory or speed
+improvement is claimed.

@@ -50,8 +50,9 @@ by its payload:
 | 20 | length | Payload | Kind-specific binary fields |
 
 Message kinds are `OPEN=0x0001`, `RENDER=0x0002`, `CLOSE=0x0003`,
-`SHUTDOWN=0x0004`, `READY=0x8001`, `ACK=0x8002`, `PAGE=0x8003`, and
-`ERROR=0x80ff`. `READY` is the first worker frame and uses request ID zero;
+`SHUTDOWN=0x0004`, `SEARCH=0x0005`, `READY=0x8001`, `ACK=0x8002`,
+`PAGE=0x8003`, `SEARCH_RESULTS=0x8004`, and `ERROR=0x80ff`. `READY` is the
+first worker frame and uses request ID zero;
 all other request/reply frames use the originating nonzero request ID.
 `OPEN` payload is tab ID (16 bytes), generation (u64), UTF-8 path length
 (u32), then exactly that many path bytes. `RENDER` payload is tab ID (16),
@@ -65,6 +66,19 @@ exactly 44 bytes; CLOSE echoes its 24-byte tab ID and generation payload;
 SHUTDOWN returns an empty payload. `ERROR` contains a stable u16 code, UTF-8
 diagnostic length as u16, then diagnostic bytes capped at 4 KiB. ERROR request
 IDs correlate with the command that failed.
+
+`SEARCH` carries tab ID (16 bytes), generation (u64), flags (u8), query length
+(u16), and exactly that many UTF-8 query bytes. Flag bit 0 requests a
+case-sensitive match and bit 1 requests a whole-word match; all other bits
+must be zero. Queries must contain 1–512 UTF-8 bytes and non-whitespace text.
+`SEARCH_RESULTS` carries tab ID (16), generation (u64), result count (u16), a
+truncated flag (u8), one reserved zero byte, then `count` entries. Each entry
+contains a zero-based page index (u32), excerpt length (u16), and UTF-8 excerpt
+of 1–128 bytes. There may be at most 250 results, and the complete response
+must fit the 64 KiB control-payload cap. Results are emitted in document page
+order and worker search runs serially on the PDFium owner thread. Both message
+kinds use the original nonzero request ID for correlation; failures use the
+normal bounded `ERROR` shape.
 
 Render/open/control requests and non-image responses have a maximum 64 KiB
 payload. A `PAGE` response contains 42 bytes of fixed metadata (tab ID as 16
@@ -94,6 +108,17 @@ the frame before creating a `Blob`/object URL. Small status and lifecycle
 metadata may use JSON commands/events. Image payloads must never be returned
 as JSON arrays, base64 strings, or JSON events. This path is documented by
 Tauri and still requires a WebView2 smoke test at the configured size cap.
+
+Text search uses an async `search_text` Tauri command and returns only the
+bounded result metadata as JSON; it does not return image data. The host checks
+the active document identity and generation before and after the worker
+operation. The frontend additionally limits results to 250, validates page
+indexes, and caps each excerpt at 128 UTF-8 bytes before creating result rows.
+The provisional search deadline is 30 seconds, separate from the configurable
+render deadline and the 2-second shutdown grace. Search results cannot cancel
+a native call already in progress; superseded query and document results are
+discarded by sequence, identity, and generation checks. Scanned-image pages
+without an existing text layer are not searchable; OCR is outside this scope.
 
 The host accepts a result only if its request ID is still registered with the
 expected reply kind and the active document still has the same identity and

@@ -6,7 +6,7 @@ LitheXPDF is an early-stage Windows PDF reader built with Rust, Tauri 2, TypeScr
 
 ## Current status
 
-The first working slice connects the interface to a Rust host and PDFium worker. The code implements one-document open, viewport-driven full-page rendering in a vertical scroll view, page navigation, and close. The latest aspect-ratio and scroll correction has automated coverage and still needs manual WebView2 review. Multiple tabs, broad document coverage, and clean-machine packaging remain in development. LitheXPDF is not ready as a packaged release.
+The current reader connects the interface to a Rust host and a separate PDFium worker. It supports opening one PDF, viewport-driven full-page rendering in a continuous vertical view, Previous/Next navigation, direct page-number entry, text search, per-document page bookmarks, dark/light themes, and close. Search runs inside the worker and returns bounded text metadata; scanned pages without an embedded text layer are not searchable. The latest toolbar and search changes have automated coverage but still need manual WebView2 review. Multiple simultaneous tabs, broad document coverage, and clean-machine packaging remain in development. LitheXPDF is not ready as a packaged release.
 
 PDFium integration currently uses a specific `pdfium-render` and PDFium pairing. Compatibility beyond the calls verified so far, and reliable setup on a clean machine, still need validation. See the [testing plan](docs/TESTING.md) for current checks and release gates.
 
@@ -18,6 +18,11 @@ PDFium integration currently uses a specific `pdfium-render` and PDFium pairing.
 - Bounded, versioned binary messages between the host and worker
 
 The frontend does not call PDFium directly; the Rust side owns document lifecycle and rendering.
+
+Bookmarks store only page numbers and labels in the WebView's local storage,
+under a key derived from a normalized document path. The hash is an identifier,
+not encryption. Theme preference is also stored locally. Neither feature stores
+PDF contents or rendered page images.
 
 ## Development setup
 

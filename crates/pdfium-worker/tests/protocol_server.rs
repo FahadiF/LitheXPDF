@@ -1,4 +1,4 @@
-use pdfium_protocol::{encode, parse_header, read_u32, Frame, Kind, OPEN_ACK_LEN};
+use pdfium_protocol::{encode, parse_header, read_u16, read_u32, Frame, Kind, OPEN_ACK_LEN};
 use std::{
     fs,
     io::{Read, Write},
@@ -332,11 +332,67 @@ fn worker_reports_two_page_metadata_and_renders_second_page() {
     let page = read_frame(&mut out);
     assert_eq!(page.kind, Kind::Page);
     assert_eq!(read_u32(&page.payload, 24).unwrap(), 1);
+
+    let query = b"LitheXPDF";
+    let mut search = tab.to_vec();
+    search.extend_from_slice(&3u64.to_be_bytes());
+    search.push(0);
+    search.extend_from_slice(&(query.len() as u16).to_be_bytes());
+    search.extend_from_slice(query);
+    send(
+        &mut child,
+        Frame {
+            kind: Kind::Search,
+            request_id: 3,
+            payload: search,
+        },
+    );
+    let results = read_frame(&mut out);
+    assert_eq!(results.kind, Kind::SearchResults);
+    assert_eq!(results.request_id, 3);
+    assert_eq!(&results.payload[..16], &tab);
+    assert_eq!(read_u16(&results.payload, 24).unwrap(), 2);
+    assert_eq!(results.payload[26], 0);
+    let mut offset = 28;
+    let mut found_pages = Vec::new();
+    for _ in 0..2 {
+        found_pages.push(read_u32(&results.payload, offset).unwrap());
+        let text_len = read_u16(&results.payload, offset + 4).unwrap() as usize;
+        offset += 6;
+        let text = std::str::from_utf8(&results.payload[offset..offset + text_len]).unwrap();
+        assert!(text.contains("LitheXPDF"));
+        offset += text_len;
+    }
+    assert_eq!(found_pages, vec![0, 1]);
+    assert_eq!(offset, results.payload.len());
+
+    for (request_id, query, flags, expected_count) in
+        [(4, &b"lithexpdf"[..], 0b01, 0), (5, &b"page"[..], 0b10, 2)]
+    {
+        let mut payload = tab.to_vec();
+        payload.extend_from_slice(&3u64.to_be_bytes());
+        payload.push(flags);
+        payload.extend_from_slice(&(query.len() as u16).to_be_bytes());
+        payload.extend_from_slice(query);
+        send(
+            &mut child,
+            Frame {
+                kind: Kind::Search,
+                request_id,
+                payload,
+            },
+        );
+        let results = read_frame(&mut out);
+        assert_eq!(results.kind, Kind::SearchResults);
+        assert_eq!(results.request_id, request_id);
+        assert_eq!(read_u16(&results.payload, 24).unwrap(), expected_count);
+    }
+
     send(
         &mut child,
         Frame {
             kind: Kind::Shutdown,
-            request_id: 3,
+            request_id: 6,
             payload: vec![],
         },
     );
