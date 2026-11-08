@@ -86,3 +86,7 @@ that the worker has closed its document after a switch. Do not describe a lower 
 set, lower memory footprint, or a leak fix as achieved until those
 measurements exist and are reported with their limits.
 
+
+## Current single-document UI accounting
+
+The current Milestone 1 view creates one lightweight DOM slot per page in the active document and reuses one decoded <img> element for the page nearest the viewport. It does not eagerly render all pages and does not currently maintain an encoded-image LRU. Scroll/page changes clear the prior src and revoke its object URL before assigning the next response. The page-slot DOM grows with page count and is not yet virtualized. The raw IPC response and the frontend's copied PNG bytes/Blob can overlap temporarily during image handoff; this transient peak has not been measured. These implementation details are not evidence of a memory improvement or a total-process memory bound.

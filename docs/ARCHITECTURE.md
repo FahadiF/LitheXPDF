@@ -285,3 +285,7 @@ size capped. Rendering is initially bounded full-page rendering. Tiling,
 multiple live documents, and extra renderer workers require benchmark evidence
 and a separately reviewed architecture decision.
 
+
+## Continuous page view — 2026-11-08
+
+The single-document reader now presents a vertical stack of lightweight page slots. It requests a bounded full-page render for the page nearest the viewport after a short scroll debounce; it does not eagerly render every page. One shared image element is moved to the selected slot, and page navigation scrolls that slot into view. The host supplies a maximum render box; the worker fits the actual page dimensions within that box while preserving aspect ratio and the existing pixel/dimension caps. This remains full-page rendering with one active image; tiles, parallel renderers, and multiple live documents are not part of this change. Runtime UI verification and memory measurement remain pending.

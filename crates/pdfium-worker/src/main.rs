@@ -206,9 +206,7 @@ impl WorkerSession {
         if !zoom.is_finite() || !(0.25..=5.0).contains(&zoom) {
             return Err((4, "zoom must be between 0.25 and 5.0".into()));
         }
-        let width = ((f64::from(target_width) * zoom).round()).clamp(1.0, 8192.0) as u32;
-        let height = ((f64::from(target_height) * zoom).round()).clamp(1.0, 8192.0) as u32;
-        validate_bitmap(width, height).map_err(protocol_err)?;
+        validate_bitmap(target_width, target_height).map_err(protocol_err)?;
         if self.identity != Some((tab_id, generation)) {
             return Err((
                 6,
@@ -226,6 +224,14 @@ impl WorkerSession {
             .pages()
             .get(page_index as i32)
             .map_err(|e| (7, format!("could not open page: {e}")))?;
+        let (width, height) = bounded_render_dimensions(
+            page.width().value,
+            page.height().value,
+            target_width,
+            target_height,
+            zoom,
+        )
+        .map_err(|e| (4, e))?;
         let page = page
             .render_with_config(
                 &PdfRenderConfig::new()
@@ -524,6 +530,40 @@ fn bounded_target_dimensions(width_points: f32, height_points: f32) -> Result<(u
     Ok((target_width, target_height))
 }
 
+fn bounded_render_dimensions(
+    page_width: f32,
+    page_height: f32,
+    target_width: u32,
+    target_height: u32,
+    zoom: f64,
+) -> Result<(u32, u32), String> {
+    if !page_width.is_finite()
+        || !page_height.is_finite()
+        || page_width <= 0.0
+        || page_height <= 0.0
+        || target_width == 0
+        || target_height == 0
+        || !zoom.is_finite()
+        || !(0.25..=5.0).contains(&zoom)
+    {
+        return Err("page and target dimensions must be positive and zoom must be in range".into());
+    }
+
+    let width = f64::from(page_width);
+    let height = f64::from(page_height);
+    let desired_scale =
+        (f64::from(target_width) / width).min(f64::from(target_height) / height) * zoom;
+    let pixel_scale = (MAX_BITMAP_PIXELS as f64 / (width * height)).sqrt();
+    let scale = desired_scale
+        .min(f64::from(MAX_BITMAP_DIMENSION) / width)
+        .min(f64::from(MAX_BITMAP_DIMENSION) / height)
+        .min(pixel_scale);
+    let bitmap_width = (width * scale).floor().max(1.0) as u32;
+    let bitmap_height = (height * scale).floor().max(1.0) as u32;
+    validate_bitmap_size(bitmap_width, bitmap_height)?;
+    Ok((bitmap_width, bitmap_height))
+}
+
 fn validate_bitmap_size(width: u32, height: u32) -> Result<(), String> {
     let pixels = u64::from(width)
         .checked_mul(u64::from(height))
@@ -580,7 +620,10 @@ impl Write for BoundedVec {
 
 #[cfg(test)]
 mod tests {
-    use super::{bounded_target_dimensions, validate_bitmap_size, BoundedVec, MAX_BITMAP_PIXELS};
+    use super::{
+        bounded_render_dimensions, bounded_target_dimensions, validate_bitmap_size, BoundedVec,
+        MAX_BITMAP_PIXELS,
+    };
     use std::io::Write;
 
     #[test]
@@ -601,6 +644,22 @@ mod tests {
     fn invalid_page_dimensions_are_rejected() {
         assert!(bounded_target_dimensions(f32::NAN, 10.0).is_err());
         assert!(bounded_target_dimensions(10.0, 0.0).is_err());
+    }
+
+    #[test]
+    fn render_dimensions_preserve_page_aspect_ratio_in_wide_viewport() {
+        let (width, height) = bounded_render_dimensions(612.0, 792.0, 1794, 800, 1.0).unwrap();
+        assert_eq!(height, 800);
+        assert!((f64::from(width) / f64::from(height) - 612.0 / 792.0).abs() < 0.002);
+        assert!(validate_bitmap_size(width, height).is_ok());
+    }
+
+    #[test]
+    fn render_dimensions_apply_zoom_without_exceeding_bitmap_caps() {
+        let (width, height) = bounded_render_dimensions(612.0, 792.0, 1800, 1400, 5.0).unwrap();
+        assert!(width <= 8_192 && height <= 8_192);
+        assert!(u64::from(width) * u64::from(height) <= MAX_BITMAP_PIXELS);
+        assert!((f64::from(width) / f64::from(height) - 612.0 / 792.0).abs() < 0.002);
     }
 
     #[test]

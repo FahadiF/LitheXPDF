@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { parseRenderResponse, PdfReaderUi, type ReaderBridge } from "./reader";
+
+const stylesheet = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
 
 const id = "00112233445566778899aabbccddeeff";
 const tab = Uint8Array.from(id.match(/../g)!.map((x) => Number.parseInt(x, 16)));
@@ -24,6 +28,9 @@ describe("bounded render response parsing", () => {
     expect(result.width).toBe(640);
     expect([...result.png]).toEqual([0x89, 0x50, 0x4e, 0x47]);
   });
+  it("keeps the hidden display override in the stylesheet", () => {
+    expect(stylesheet).toMatch(/\[hidden\]\s*\{\s*display:\s*none\s*!important;/);
+  });
   it("rejects stale page, wrong tab, bad length, and invalid bitmap bounds", () => {
     expect(() => parseRenderResponse(pageFrame(1), { documentId: id, generation: 7, pageIndex: 0 })).toThrow(/stale/);
     expect(() => parseRenderResponse(pageFrame(), { documentId: id, generation: 7, pageIndex: 0, tabId: new Uint8Array(16) })).toThrow(/different document/);
@@ -36,7 +43,11 @@ describe("bounded render response parsing", () => {
 
 describe("reader image lifecycle", () => {
   beforeEach(() => {
-    document.body.innerHTML = `<main><button id="open-button"></button><button id="close-button"></button><button id="previous-button"></button><button id="next-button"></button><span id="page-counter"></span><span id="document-name"></span><span id="status-text"></span><span id="page-size"></span><section id="viewer"><div id="empty-state"></div><div id="loading-state" hidden></div><img id="page-image" hidden><div id="error-state" hidden></div></section></main>`;
+    document.head.innerHTML = `<style>${stylesheet}</style>`;
+    document.body.innerHTML = `<main><button id="open-button"></button><button id="close-button"></button><button id="previous-button"></button><button id="next-button"></button><span id="page-counter"></span><span id="document-name"></span><span id="status-text"></span><span id="page-size"></span><section id="viewer"><div id="loading-state" class="loading-state" hidden></div><div id="page-stack" class="page-stack" hidden><img id="page-image" hidden></div><div id="empty-state" class="empty-state"></div><div id="error-state" class="error-state" hidden></div></section></main>`;
+  });
+
+  it("hides loading and image elements marked hidden", () => {
   });
 
   it("revokes the prior page URL and rejects an image response that arrives after close", async () => {
@@ -55,8 +66,13 @@ describe("reader image lifecycle", () => {
       revokeObjectURL: (url) => revoked.push(url),
     };
     const ui = new PdfReaderUi(document, bridge);
+    const image = document.querySelector<HTMLImageElement>("#page-image")!;
     await ui.open("C:\\sample.pdf");
+    expect(document.querySelectorAll(".page-slot")).toHaveLength(2);
     expect((document.querySelector("#page-image") as HTMLImageElement).src).toContain("blob:test-1");
+    (document.querySelector("#page-image") as HTMLImageElement).dispatchEvent(new Event("load"));
+    expect((document.querySelector("#loading-state") as HTMLElement).hidden).toBe(true);
+    expect(document.querySelector("#status-text")?.textContent).toBe("Ready");
     const next = document.querySelector<HTMLButtonElement>("#next-button")!;
     next.click();
     await Promise.resolve();
@@ -66,7 +82,7 @@ describe("reader image lifecycle", () => {
     releaseRender(pageFrame(1, 7, [0x89, 0x50, 0x4e, 0x47], id));
     await Promise.resolve(); await Promise.resolve();
     expect(urls).toBe(1);
-    expect((document.querySelector("#page-image") as HTMLImageElement).hasAttribute("src")).toBe(false);
+    expect(image.hasAttribute("src")).toBe(false);
   });
 
   it("shows an error and leaves no stale image when render fails", async () => {
@@ -80,9 +96,43 @@ describe("reader image lifecycle", () => {
       createObjectURL: () => "blob:unused",
       revokeObjectURL: vi.fn(),
     };
+    const image = document.querySelector<HTMLImageElement>("#page-image")!;
     const ui = new PdfReaderUi(document, bridge);
     await ui.open("C:\\bad.pdf");
     expect(document.querySelector("#error-state")?.textContent).toContain("corrupt PDF page");
-    expect((document.querySelector("#page-image") as HTMLImageElement).hasAttribute("src")).toBe(false);
+    expect(image.hasAttribute("src")).toBe(false);
+  });
+
+  it("renders the page nearest the scroll viewport after scrolling settles", async () => {
+    vi.useFakeTimers();
+    const bridge: ReaderBridge = {
+      pickPdf: async () => null,
+      invoke: vi.fn(async (command: string, args?: Record<string, unknown>) => {
+        if (command === "open_pdf") return { document_id: id, generation: 7, page_count: 3, page_width_points: 612, page_height_points: 792 } as never;
+        if (command === "render_page") return pageFrame(Number(args?.pageIndex ?? 0)) as never;
+        return undefined as never;
+      }),
+      createObjectURL: () => "blob:scroll",
+      revokeObjectURL: vi.fn(),
+    };
+    try {
+      const ui = new PdfReaderUi(document, bridge);
+      await ui.open("C:\\scroll.pdf");
+      const viewer = document.querySelector<HTMLElement>("#viewer")!;
+      const slots = [...document.querySelectorAll<HTMLElement>(".page-slot")];
+      Object.defineProperty(viewer, "clientHeight", { configurable: true, value: 400 });
+      slots.forEach((slot, index) => {
+        Object.defineProperty(slot, "offsetTop", { configurable: true, value: index * 500 });
+        Object.defineProperty(slot, "offsetHeight", { configurable: true, value: 400 });
+      });
+      viewer.scrollTop = 500;
+      viewer.dispatchEvent(new Event("scroll"));
+      await vi.advanceTimersByTimeAsync(100);
+      await Promise.resolve();
+      expect(bridge.invoke).toHaveBeenCalledWith("render_page", expect.objectContaining({ pageIndex: 1 }));
+      expect(document.querySelector("#page-counter")?.textContent).toBe("2 / 3");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -106,8 +106,8 @@ export class PdfReaderUi {
     this.nextButton = this.required("#next-button");
     this.openButton.addEventListener("click", () => void this.openPicker());
     this.closeButton.addEventListener("click", () => void this.close());
-    this.previousButton.addEventListener("click", () => void this.showPage(this.pageIndex - 1));
-    this.nextButton.addEventListener("click", () => void this.showPage(this.pageIndex + 1));
+    this.previousButton.addEventListener("click", () => this.navigateToPage(this.pageIndex - 1));
+    this.nextButton.addEventListener("click", () => this.navigateToPage(this.pageIndex + 1));
     this.viewer.addEventListener("scroll", () => this.scheduleViewportPageRender());
   }
 
@@ -199,6 +199,17 @@ export class PdfReaderUi {
       }
       if (closest !== this.pageIndex) void this.showPage(closest);
     }, 100);
+  }
+
+  private navigateToPage(index: number): void {
+    if (index < 0 || index >= this.pageSlots.length) return;
+    const slot = this.pageSlots[index];
+    if (typeof slot.scrollIntoView === "function") {
+      slot.scrollIntoView({ behavior: "auto", block: "start" });
+    } else {
+      this.viewer.scrollTop = slot.offsetTop;
+    }
+    void this.showPage(index);
   }
 
   private async showPage(index: number): Promise<void> {
