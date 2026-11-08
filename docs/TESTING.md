@@ -90,7 +90,7 @@ geometry and pass navigation tests beyond its recycled slot window.
   runs with the current user's privileges.
 - No memory or performance improvement is claimed. Memory and latency
   measurements on a representative PDF corpus remain outstanding.
-- Multiple tabs are not implemented; the app supports one live PDFium document.
+- Multiple UI tabs are implemented with one live PDFium document. The 30–50-tab switching workload has not been measured.
 
 Do not treat the project as release-ready until the manual checks,
 compatibility gates, and clean-machine packaging checks pass.
@@ -184,3 +184,40 @@ multi-page PDF, scroll quickly and slowly, confirm no centered loader appears
 between pages, verify the first-page loader disappears after open, and compare
 page transitions with prefetch enabled. The automated checks do not establish
 the visual experience in the running Tauri window.
+
+
+### Tabs, menu, zoom, print, and render modes — 2026-11-08
+
+The frontend now permits up to 100 tab records in one window. Inactive tabs
+retain only their path, ID, page index, zoom, and scroll offsets. Tab switches
+close and acknowledge the previous native document before opening the selected
+path. The recent menu stores up to ten file paths locally in WebView storage.
+Tabs themselves are session-only and do not persist across app restarts.
+
+The hamburger menu exposes Open, New tab, Recent, Zoom, Print, Options and
+settings, Help, and About. About displays version 0.1.0 and the developer
+contact and profile links supplied for the project. Zoom is per tab and ranges
+from 25% to 400%. Printing currently prints the displayed page through the
+WebView print dialog; full-document PDF printing is not implemented.
+
+Rendering settings are current page only, current page plus next page, and
+progressive all-pages rendering. All-pages mode walks pages serially after
+idle pauses while keeping one render active and the existing two-entry/16 MiB
+encoded cache. It can consume CPU and a foreground request may wait for an
+already-running PDFium render. It does not retain every rendered page.
+
+Checks actually run in this implementation pass:
+
+| Command | Result |
+| --- | --- |
+| pnpm typecheck | Passed, exit 0 |
+| pnpm build | Passed, exit 0 |
+| git diff --check | Passed, exit 0; Git printed line-ending conversion warnings |
+
+The automated test suite was not run and no new automated tests were added in
+this pass. The desktop WebView2 window was not opened for manual verification.
+Before treating the feature as complete, manually verify opening at least two
+PDFs, switching tabs and restoring page/zoom/scroll state, closing active and
+inactive tabs, selecting each rendering mode, zoom limits, the native print
+dialog/current-page output, About links, and behavior with 30–50 tabs. The
+all-pages mode's CPU impact and full-workload memory use remain unmeasured.

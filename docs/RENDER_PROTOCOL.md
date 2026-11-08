@@ -179,12 +179,15 @@ discard partial output, and return `IMAGE_TOO_LARGE`; do not retry at a larger
 size or stream an unbounded response. Keep at most one result awaiting the
 frontend. The frontend may retain at most two validated encoded page responses,
 with a 16 MiB total cap, for the active document. A response above that cap is
-displayed only when directly requested and is not cached. After one second of
-idle time, only the immediately following page may be prefetched. On document
-replacement or close, clear all cached bytes and decoded WebView image
-references, clear the image source, and revoke its object URL. Inactive
-background tabs retain no encoded or decoded page images. Never store image
-data in tab metadata or persist it to disk.
+displayed only when directly requested and is not cached. In nearby mode, one second of idle time schedules only the immediately
+following page. In all-pages mode, remaining pages are prefetched sequentially,
+one request at a time, with the same delay and cache limits. Foreground work
+may wait for a native render already in progress; PDFium calls cannot be
+cancelled in place. On document replacement or close, clear all cached bytes
+and decoded WebView image references, clear the image source, and revoke its
+object URL. Inactive background tabs retain no encoded or decoded page images.
+Never store image data in tab metadata or persist it to disk. All-pages mode
+does not raise the worker queue limit or retain the full document's image set.
 
 The initial renderer is bounded full-page rendering. Do not add tile/partial
 rendering, multiple live documents, or additional renderer workers without

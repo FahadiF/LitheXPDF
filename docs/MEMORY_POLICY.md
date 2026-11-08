@@ -91,9 +91,9 @@ set, lower memory footprint, or a leak fix as achieved until those
 measurements exist and are reported with their limits.
 
 
-## Current single-document UI accounting
+## Current tabbed UI accounting
 
-The current single-document view creates one lightweight DOM slot per page in the active document and reuses one decoded <img> element for the page nearest the viewport. It does not eagerly render all pages. After one second without page changes it may prefetch the immediately following page into a cache of at most two encoded responses and 16 MiB total. It does not retain decoded images or object URLs for prefetched pages. On a page change, the prior image remains assigned until the replacement response is validated; the prior src is then cleared and its URL revoked. Opening/replacing/closing a document clears all prefetched bytes and revokes the active image URL. The page-slot DOM grows with page count and is not yet virtualized. The raw IPC response and the frontend's copied PNG bytes/Blob can overlap temporarily during image handoff; this transient peak has not been measured. These implementation details are not evidence of a memory improvement or a total-process memory bound.
+The tabbed view creates one lightweight DOM slot per page in the active document and reuses one decoded <img> element for the page nearest the viewport. The frontend keeps at most 100 tab records; each inactive record retains only a tab ID, path, page index, zoom, and scroll offsets. No inactive tab retains document/page objects, encoded frames, decoded images, or object URLs. Current-page mode renders on demand. Nearby mode waits one second and prepares only the next page. All-pages mode processes remaining pages serially after idle pauses; it still uses one render at a time and the same two-response/16 MiB cache, so older pages may render again when revisited. On a page change, the prior image remains assigned until the replacement response is validated; its URL is then revoked. Closing/switching a tab closes the native document before opening another and clears active cache/image state. The page-slot DOM grows with page count and is not yet virtualized. The raw IPC response and the frontend's copied PNG bytes/Blob can overlap temporarily during image handoff; this transient peak has not been measured. These implementation details are not evidence of a memory improvement or a total-process memory bound.
 
 The five-slot DOM experiment was reverted after it truncated navigation and
 did not provide a bounded object-URL lifecycle. The current one-image design
@@ -126,3 +126,6 @@ new validated response arrives.
 
 The prefetch delay and cache limits are initial test targets, not measured
 performance or memory improvements. Full-document eager rendering is not used.
+
+
+The recent-files menu stores at most ten full local paths in WebView local storage because this is required to reopen recent documents. This is local profile data, not encrypted. It does not store PDF contents or page images.

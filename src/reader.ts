@@ -13,6 +13,23 @@ const PAGE_KIND = 0x8003;
 const PREFETCH_DELAY_MS = 1_000;
 const PREFETCH_CACHE_MAX_PAGES = 2;
 const PREFETCH_CACHE_MAX_BYTES = 16 * 1024 * 1024;
+const MAX_TABS = 100;
+const MAX_RECENT_FILES = 10;
+const RECENT_STORAGE_KEY = "lithexpdf.recent";
+const RENDER_MODE_STORAGE_KEY = "lithexpdf.renderMode";
+const APP_VERSION = "0.1.0";
+
+type RenderMode = "current" | "nearby" | "all";
+
+interface ReaderTab {
+  id: string;
+  path: string;
+  name: string;
+  pageIndex: number;
+  zoom: number;
+  scrollTop: number;
+  scrollLeft: number;
+}
 
 interface PrefetchTask {
   pageIndex: number;
@@ -114,12 +131,29 @@ export class PdfReaderUi {
   private readonly searchMatchCase: HTMLInputElement;
   private readonly searchWholeWord: HTMLInputElement;
   private readonly bookmarkStore: BookmarkStore;
+  private readonly tabStrip: HTMLElement | null;
+  private readonly tabsEmpty: HTMLElement | null;
+  private readonly newTabButton: HTMLButtonElement | null;
+  private readonly menuButton: HTMLButtonElement | null;
+  private readonly menuPanel: HTMLElement | null;
+  private readonly recentList: HTMLElement | null;
+  private readonly zoomInButton: HTMLButtonElement | null;
+  private readonly zoomOutButton: HTMLButtonElement | null;
+  private readonly zoomLevel: HTMLElement | null;
+  private readonly printButton: HTMLButtonElement | null;
+  private readonly tabs: ReaderTab[] = [];
+  private activeTabId?: string;
+  private zoom = 1;
+  private renderMode: RenderMode = readRenderMode();
+  private recentPaths = readRecentPaths();
+  private allPrefetchCursor = 0;
   private pageSlots: HTMLElement[] = [];
   private current?: OpenPdfResult;
   private currentPath?: string;
   private bookmarks: Bookmark[] = [];
   private pageIndex = 0;
   private objectUrl?: string;
+  private renderedPageIndex?: number;
   private generationToken = 0;
   private renderToken = 0;
   private activeRequestToken?: string;
@@ -163,8 +197,56 @@ export class PdfReaderUi {
     this.searchMatchCase = this.required("#search-match-case");
     this.searchWholeWord = this.required("#search-whole-word");
     this.bookmarkStore = bridge.bookmarks ?? new LocalBookmarkStore();
+    this.tabStrip = this.optional("#tab-strip");
+    this.tabsEmpty = this.optional("#tabs-empty");
+    this.newTabButton = this.optional<HTMLButtonElement>("#new-tab-button");
+    this.menuButton = this.optional<HTMLButtonElement>("#menu-button");
+    this.menuPanel = this.optional("#menu-panel");
+    this.recentList = this.optional("#recent-list");
+    this.zoomInButton = this.optional<HTMLButtonElement>("#zoom-in-button");
+    this.zoomOutButton = this.optional<HTMLButtonElement>("#zoom-out-button");
+    this.zoomLevel = this.optional("#zoom-level");
+    this.printButton = this.optional<HTMLButtonElement>("#print-button");
+    const versionElement = this.optional("#app-version");
+    if (versionElement) versionElement.textContent = APP_VERSION;
     this.openButton.addEventListener("click", () => void this.openPicker());
     this.closeButton.addEventListener("click", () => void this.close());
+    this.newTabButton?.addEventListener("click", () => void this.openPicker());
+    this.zoomInButton?.addEventListener("click", () => this.changeZoom(0.1));
+    this.zoomOutButton?.addEventListener("click", () => this.changeZoom(-0.1));
+    this.printButton?.addEventListener("click", () => this.printCurrentPage());
+    this.menuButton?.addEventListener("click", () => this.setMenuOpen(this.menuPanel?.hidden ?? true));
+    this.optional<HTMLButtonElement>("#menu-open")?.addEventListener("click", () => { this.setMenuOpen(false); void this.openPicker(); });
+    this.optional<HTMLButtonElement>("#menu-new")?.addEventListener("click", () => { this.setMenuOpen(false); void this.openPicker(); });
+    this.optional<HTMLButtonElement>("#menu-zoom-in")?.addEventListener("click", () => { this.setMenuOpen(false); this.changeZoom(0.1); });
+    this.optional<HTMLButtonElement>("#menu-zoom-out")?.addEventListener("click", () => { this.setMenuOpen(false); this.changeZoom(-0.1); });
+    this.optional<HTMLButtonElement>("#menu-print")?.addEventListener("click", () => { this.setMenuOpen(false); this.printCurrentPage(); });
+    this.optional<HTMLButtonElement>("#menu-settings")?.addEventListener("click", () => { this.setMenuOpen(false); this.showDialog("#settings-dialog"); });
+    this.optional<HTMLButtonElement>("#menu-about")?.addEventListener("click", () => { this.setMenuOpen(false); this.showDialog("#about-dialog"); });
+    this.optional<HTMLButtonElement>("#menu-help")?.addEventListener("click", () => { this.setMenuOpen(false); this.showDialog("#help-dialog"); });
+    this.renderTabs();
+    this.renderRecentMenu();
+    this.syncRenderModeSettings();
+    this.appDocument().querySelectorAll<HTMLInputElement>('input[name="render-mode"]').forEach((radio) => {
+      radio.checked = radio.value === this.renderMode;
+      radio.addEventListener("change", () => {
+        if (radio.checked) this.setRenderMode(radio.value);
+      });
+    });
+    this.appDocument().querySelectorAll<HTMLElement>("[data-dialog-close]").forEach((button) => {
+      button.addEventListener("click", () => this.closeDialog(button.closest("dialog")));
+    });
+    this.appDocument().querySelectorAll<HTMLDialogElement>(".app-dialog").forEach((dialog) => {
+      dialog.addEventListener("click", (event) => {
+        if (event.target === dialog) this.closeDialog(dialog);
+      });
+    });
+    this.appDocument().addEventListener("pointerdown", (event) => {
+      const target = event.target;
+      if (this.menuPanel && this.menuButton && target instanceof Node
+        && !this.menuPanel.contains(target) && !this.menuButton.contains(target)) this.setMenuOpen(false);
+    });
+    this.appDocument().addEventListener("keydown", (event) => this.handleKeyboardShortcuts(event as KeyboardEvent));
     this.previousButton.addEventListener("click", () => this.navigateToPage(this.pageIndex - 1));
     this.nextButton.addEventListener("click", () => this.navigateToPage(this.pageIndex + 1));
     this.viewer.addEventListener("scroll", () => this.scheduleViewportPageRender());
@@ -183,6 +265,218 @@ export class PdfReaderUi {
     this.searchWholeWord.addEventListener("change", () => this.startSearch(true));
   }
 
+  private optional<T extends HTMLElement = HTMLElement>(selector: string): T | null {
+    return this.root.querySelector<T>(selector);
+  }
+
+  private appDocument(): Document { return this.image.ownerDocument; }
+
+  private renderTabs(): void {
+    if (!this.tabStrip) return;
+    this.tabStrip.querySelectorAll(".tab-item").forEach((item) => item.remove());
+    if (this.tabsEmpty) this.tabsEmpty.hidden = this.tabs.length > 0;
+    const doc = this.appDocument();
+    for (const tab of this.tabs) {
+      const item = doc.createElement("div");
+      item.className = "tab-item";
+      const active = tab.id === this.activeTabId;
+      item.classList.toggle("active", active);
+      const select = doc.createElement("button");
+      select.type = "button";
+      select.className = "document-tab";
+      select.setAttribute("role", "tab");
+      select.setAttribute("aria-selected", String(active));
+      select.setAttribute("aria-controls", "viewer");
+      select.title = tab.path;
+      const title = doc.createElement("span");
+      title.className = "document-tab-title";
+      title.textContent = tab.name;
+      select.append(title);
+      select.addEventListener("click", () => void this.activateTab(tab.id));
+      const close = doc.createElement("button");
+      close.type = "button";
+      close.className = "document-tab-close";
+      close.textContent = "×";
+      close.title = "Close " + tab.name;
+      close.setAttribute("aria-label", "Close tab " + tab.name);
+      close.addEventListener("click", (event) => {
+        event.stopPropagation();
+        void this.closeTabById(tab.id);
+      });
+      item.append(select, close);
+      this.tabStrip.insertBefore(item, this.newTabButton);
+    }
+  }
+
+  private async closeTabById(tabId: string): Promise<void> {
+    if (tabId === this.activeTabId) {
+      await this.close();
+      return;
+    }
+    const index = this.tabs.findIndex((tab) => tab.id === tabId);
+    if (index < 0) return;
+    this.tabs.splice(index, 1);
+    this.renderTabs();
+  }
+
+  private saveActiveTabState(): void {
+    if (!this.activeTabId) return;
+    const tab = this.tabs.find((item) => item.id === this.activeTabId);
+    if (!tab) return;
+    tab.pageIndex = this.pageIndex;
+    tab.zoom = this.zoom;
+    tab.scrollTop = this.viewer.scrollTop;
+    tab.scrollLeft = this.viewer.scrollLeft;
+  }
+
+  private recordRecentPath(path: string): void {
+    this.recentPaths = [path, ...this.recentPaths.filter((item) => normalizeLocalPath(item) !== normalizeLocalPath(path))]
+      .slice(0, MAX_RECENT_FILES);
+    try { this.appDocument().defaultView?.localStorage.setItem(RECENT_STORAGE_KEY, JSON.stringify(this.recentPaths)); } catch { /* Recent files remain available for this session. */ }
+    this.renderRecentMenu();
+  }
+
+  private renderRecentMenu(): void {
+    if (!this.recentList) return;
+    this.recentList.replaceChildren();
+    if (this.recentPaths.length === 0) {
+      const empty = this.appDocument().createElement("p");
+      empty.className = "recent-empty";
+      empty.textContent = "No recent PDFs";
+      this.recentList.append(empty);
+      return;
+    }
+    for (const path of this.recentPaths) {
+      const button = this.appDocument().createElement("button");
+      button.type = "button";
+      button.className = "menu-item recent-item";
+      button.setAttribute("role", "menuitem");
+      button.title = path;
+      button.textContent = path.split(/[\\/]/).at(-1) ?? path;
+      button.addEventListener("click", () => {
+        this.setMenuOpen(false);
+        void this.open(path);
+      });
+      this.recentList.append(button);
+    }
+  }
+
+  private setMenuOpen(open: boolean): void {
+    if (!this.menuPanel) return;
+    this.menuPanel.hidden = !open;
+    this.menuButton?.setAttribute("aria-expanded", String(open));
+  }
+
+  private showDialog(selector: string): void {
+    const dialog = this.optional<HTMLDialogElement>(selector);
+    if (!dialog) return;
+    if (typeof dialog.showModal === "function") dialog.showModal();
+    else dialog.setAttribute("open", "");
+  }
+
+  private closeDialog(dialog: HTMLDialogElement | null): void {
+    if (!dialog) return;
+    if (typeof dialog.close === "function" && dialog.open) dialog.close();
+    else dialog.removeAttribute("open");
+  }
+
+  private handleKeyboardShortcuts(event: KeyboardEvent): void {
+    if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+    const key = event.key.toLowerCase();
+    if (key === "o") { event.preventDefault(); void this.openPicker(); }
+    else if (key === "p") { event.preventDefault(); this.printCurrentPage(); }
+    else if (key === "+" || key === "=") { event.preventDefault(); this.changeZoom(0.1); }
+    else if (key === "-") { event.preventDefault(); this.changeZoom(-0.1); }
+    else if (key === "tab" && this.tabs.length > 1) {
+      event.preventDefault();
+      const index = this.tabs.findIndex((tab) => tab.id === this.activeTabId);
+      const direction = event.shiftKey ? -1 : 1;
+      const next = this.tabs[(index + direction + this.tabs.length) % this.tabs.length];
+      if (next) void this.activateTab(next.id);
+    }
+  }
+
+  private applyZoom(): void {
+    this.pageStack.style.width = (this.zoom * 100) + "%";
+    this.pageStack.style.maxWidth = Math.round(1200 * this.zoom) + "px";
+    this.pageStack.dataset.zoom = String(this.zoom);
+    if (this.zoomLevel) this.zoomLevel.textContent = Math.round(this.zoom * 100) + "%";
+  }
+
+  private changeZoom(delta: number): void {
+    if (!this.current) return;
+    const next = Math.max(0.25, Math.min(4, Math.round((this.zoom + delta) * 100) / 100));
+    if (next === this.zoom) return;
+    this.zoom = next;
+    this.saveActiveTabState();
+    this.applyZoom();
+    const top = this.viewer.scrollTop;
+    const left = this.viewer.scrollLeft;
+    void this.showPage(this.pageIndex);
+    this.appDocument().defaultView?.requestAnimationFrame(() => {
+      this.viewer.scrollTop = top;
+      this.viewer.scrollLeft = left;
+    });
+  }
+
+  private printCurrentPage(): void {
+    if (!this.current || this.renderedPageIndex !== this.pageIndex) {
+      this.showError("Wait for the current page to finish rendering before printing.");
+      return;
+    }
+    const slot = this.pageSlots[this.pageIndex];
+    const view = this.appDocument().defaultView;
+    if (!slot || !view?.print) {
+      this.showError("Printing is not available in this WebView.");
+      return;
+    }
+    slot.classList.add("print-target");
+    const cleanup = () => slot.classList.remove("print-target");
+    view.addEventListener("afterprint", cleanup, { once: true });
+    try {
+      view.print();
+      setTimeout(cleanup, 2_000);
+    } catch (error) {
+      cleanup();
+      this.showError(error);
+    }
+  }
+
+  private syncRenderModeSettings(): void {
+    this.appDocument().querySelectorAll<HTMLInputElement>('input[name="render-mode"]').forEach((radio) => {
+      radio.checked = radio.value === this.renderMode;
+    });
+  }
+
+  private setRenderMode(value: string): void {
+    if (value !== "current" && value !== "nearby" && value !== "all") return;
+    this.renderMode = value;
+    try { this.appDocument().defaultView?.localStorage.setItem(RENDER_MODE_STORAGE_KEY, value); } catch { /* The selected mode remains active for this session. */ }
+    this.syncRenderModeSettings();
+    this.cancelPrefetch();
+    if (value === "all") this.allPrefetchCursor = 0;
+    if (this.current && value !== "current") {
+      this.scheduleNextPagePrefetch(this.pageIndex, this.current, this.generationToken);
+    }
+  }
+
+  async close(): Promise<void> {
+    const closingId = this.activeTabId;
+    if (!closingId) {
+      await this.closeCurrentDocument();
+      return;
+    }
+    this.saveActiveTabState();
+    const closingIndex = this.tabs.findIndex((tab) => tab.id === closingId);
+    const nextId = this.tabs[closingIndex + 1]?.id ?? this.tabs[closingIndex - 1]?.id;
+    await this.closeCurrentDocument();
+    const latestIndex = this.tabs.findIndex((tab) => tab.id === closingId);
+    if (latestIndex >= 0) this.tabs.splice(latestIndex, 1);
+    this.activeTabId = undefined;
+    this.renderTabs();
+    if (nextId && this.tabs.some((tab) => tab.id === nextId)) await this.activateTab(nextId);
+  }
+
   private required<T extends HTMLElement>(selector: string): T {
     const element = this.root.querySelector<T>(selector);
     if (!element) throw new Error(`Missing UI element ${selector}`);
@@ -194,10 +488,41 @@ export class PdfReaderUi {
     try {
       const selected = await this.bridge.pickPdf();
       if (typeof selected === "string") await this.open(selected);
+      else if (Array.isArray(selected)) for (const path of selected) await this.open(path);
     } catch (error) { this.showError(error); }
   }
 
   async open(path: string): Promise<void> {
+    const existing = this.tabs.find((tab) => normalizeLocalPath(tab.path) === normalizeLocalPath(path));
+    if (existing) {
+      await this.activateTab(existing.id);
+      return;
+    }
+    if (this.tabs.length >= MAX_TABS) {
+      this.showError("This window has reached the " + MAX_TABS + "-tab limit. Close a document before opening another.");
+      return;
+    }
+    const tab: ReaderTab = {
+      id: crypto.randomUUID().replaceAll("-", ""),
+      path,
+      name: path.split(/[\\/]/).at(-1) ?? path,
+      pageIndex: 0,
+      zoom: 1,
+      scrollTop: 0,
+      scrollLeft: 0,
+    };
+    this.tabs.push(tab);
+    this.renderTabs();
+    await this.activateTab(tab.id);
+  }
+
+  private async activateTab(tabId: string): Promise<void> {
+    const tab = this.tabs.find((item) => item.id === tabId);
+    if (!tab) return;
+    if (this.activeTabId === tabId && this.current) return;
+
+    this.saveActiveTabState();
+    const previousDocument = this.current;
     const token = ++this.generationToken;
     this.renderToken++;
     this.cancelCurrentRender();
@@ -205,49 +530,81 @@ export class PdfReaderUi {
     this.clearImage();
     this.current = undefined;
     this.currentPath = undefined;
+    this.activeTabId = tabId;
+    this.invalidateSearch();
     this.bookmarks = [];
     this.renderBookmarks();
     this.setBookmarksPanel(false);
-    this.invalidateSearch();
-    this.pageIndex = 0;
+    this.pageIndex = tab.pageIndex;
+    this.zoom = clampZoom(tab.zoom);
+    this.allPrefetchCursor = 0;
     this.pageSlots = [];
     this.pageNumber.value = "";
     this.pageTotal.textContent = "/ —";
     this.pageSize.textContent = "";
     this.pageStack.replaceChildren();
     this.pageStack.hidden = true;
-    this.updateControls();
-    this.name.textContent = "Opening document…";
+    this.empty.hidden = true;
+    this.name.textContent = tab.name;
     this.status.textContent = "Opening PDF";
     this.loading.hidden = false;
-    this.empty.hidden = true;
     this.clearError();
-    const documentId = crypto.randomUUID().replaceAll("-", "");
-    try {
-      const result = await this.bridge.invoke<OpenPdfResult>("open_pdf", { documentId, path });
-      if (token !== this.generationToken) { await this.bridge.invoke("close_pdf", { documentId, generation: result.generation }); return; }
-      this.current = result;
-      this.currentPath = path;
+    this.applyZoom();
+    this.updateControls();
+    this.renderTabs();
+
+    if (previousDocument) {
       try {
-        this.bookmarks = (await this.bookmarkStore.load(path))
+        await this.bridge.invoke("close_pdf", {
+          documentId: previousDocument.document_id,
+          generation: previousDocument.generation,
+        });
+      } catch (error) {
+        if (token === this.generationToken) this.showError("Could not close the previous PDF: " + errorMessage(error));
+      }
+    }
+    if (token !== this.generationToken) return;
+
+    try {
+      const result = await this.bridge.invoke<OpenPdfResult>("open_pdf", {
+        documentId: tab.id,
+        path: tab.path,
+      });
+      if (token !== this.generationToken) {
+        await this.bridge.invoke("close_pdf", { documentId: result.document_id, generation: result.generation });
+        return;
+      }
+
+      this.current = result;
+      this.currentPath = tab.path;
+      this.zoom = clampZoom(tab.zoom);
+      this.pageIndex = Math.max(0, Math.min(tab.pageIndex, result.page_count - 1));
+      tab.pageIndex = this.pageIndex;
+      this.recordRecentPath(tab.path);
+      try {
+        this.bookmarks = (await this.bookmarkStore.load(tab.path))
           .filter((bookmark) => bookmark.pageNumber <= result.page_count);
       } catch (error) {
         this.bookmarks = [];
-        this.showError(`Could not load bookmarks: ${error instanceof Error ? error.message : String(error)}`);
+        this.showError("Could not load bookmarks: " + errorMessage(error));
       }
       if (token !== this.generationToken) {
-        await this.bridge.invoke("close_pdf", { documentId, generation: result.generation });
+        await this.bridge.invoke("close_pdf", { documentId: result.document_id, generation: result.generation });
         return;
       }
+
       this.renderBookmarks();
-      this.name.textContent = path.split(/[\\/]/).at(-1) ?? path;
-      this.pageIndex = 0;
+      this.name.textContent = tab.name;
       this.createPageSlots(result);
-      this.pageNumber.value = "1";
-      this.pageTotal.textContent = `/ ${result.page_count}`;
-      this.pageSize.textContent = `${result.page_width_points.toFixed(0)} × ${result.page_height_points.toFixed(0)} pt`;
+      this.applyZoom();
+      this.viewer.scrollTop = tab.scrollTop;
+      this.viewer.scrollLeft = tab.scrollLeft;
+      this.pageNumber.value = String(this.pageIndex + 1);
+      this.pageTotal.textContent = "/ " + result.page_count;
+      this.pageSize.textContent = result.page_width_points.toFixed(0) + " × " + result.page_height_points.toFixed(0) + " pt";
       this.updateControls();
-      await this.showPage(0, true);
+      this.renderTabs();
+      await this.showPage(this.pageIndex, true);
     } catch (error) {
       if (token === this.generationToken) {
         this.loading.hidden = true;
@@ -256,10 +613,10 @@ export class PdfReaderUi {
         this.pageSlots = [];
         this.current = undefined;
         this.currentPath = undefined;
-        this.bookmarks = [];
-        this.renderBookmarks();
-        this.name.textContent = "No document open";
+        this.renderTabs();
+        this.name.textContent = tab.name;
         this.empty.hidden = false;
+        this.updateControls();
         this.showError(error);
       }
     }
@@ -563,6 +920,7 @@ export class PdfReaderUi {
       if (generationToken !== this.generationToken || renderToken !== this.renderToken
         || this.current?.document_id !== doc.document_id || this.current.generation !== doc.generation
         || this.pageIndex !== index) return;
+      if (this.renderMode === "all" && this.allPrefetchCursor === index) this.allPrefetchCursor++;
 
       const imageBuffer = parsed.png.slice().buffer as ArrayBuffer;
       const slot = this.pageSlots[index];
@@ -574,8 +932,10 @@ export class PdfReaderUi {
       this.image.onload = () => {
         if (generationToken === this.generationToken && renderToken === this.renderToken) {
           this.image.hidden = false;
+          this.renderedPageIndex = index;
           this.loading.hidden = true;
           this.status.textContent = "Ready";
+          this.updateControls();
         }
       };
       this.image.onerror = () => {
@@ -599,18 +959,34 @@ export class PdfReaderUi {
 
   private scheduleNextPagePrefetch(pageIndex: number, doc: OpenPdfResult, generationToken: number): void {
     this.cancelPrefetch();
-    if (pageIndex + 1 >= doc.page_count) return;
+    if (this.renderMode === "current") return;
+    let targetPage: number;
+    if (this.renderMode === "all") {
+      targetPage = this.nextAllPageToPrefetch(pageIndex, doc.page_count);
+      if (targetPage < 0) return;
+    } else {
+      targetPage = pageIndex + 1;
+      if (targetPage >= doc.page_count || this.prefetchedPages.has(targetPage)) return;
+    }
     this.prefetchTimer = setTimeout(() => {
       this.prefetchTimer = undefined;
       if (generationToken !== this.generationToken || this.current?.document_id !== doc.document_id
-        || this.current.generation !== doc.generation || this.pageIndex !== pageIndex) return;
+        || this.current.generation !== doc.generation) return;
       const task: PrefetchTask = {
-        pageIndex: pageIndex + 1, requestToken: crypto.randomUUID(), generationToken,
+        pageIndex: targetPage, requestToken: crypto.randomUUID(), generationToken,
         cancelled: false, promoted: false, promise: Promise.resolve(undefined),
       };
       this.prefetchTask = task;
       task.promise = this.runPrefetch(task, doc);
     }, PREFETCH_DELAY_MS);
+  }
+
+  private nextAllPageToPrefetch(currentPage: number, pageCount: number): number {
+    while (this.allPrefetchCursor < pageCount
+      && (this.allPrefetchCursor === currentPage || this.prefetchedPages.has(this.allPrefetchCursor))) {
+      this.allPrefetchCursor++;
+    }
+    return this.allPrefetchCursor < pageCount ? this.allPrefetchCursor : -1;
   }
 
   private async runPrefetch(task: PrefetchTask, doc: OpenPdfResult): Promise<ArrayBuffer | undefined> {
@@ -628,6 +1004,7 @@ export class PdfReaderUi {
         documentId: doc.document_id, generation: doc.generation, pageIndex: task.pageIndex,
         tabId: uuidBytes(doc.document_id),
       });
+      if (this.renderMode === "all" && this.allPrefetchCursor === task.pageIndex) this.allPrefetchCursor++;
       if (task.promoted) return buffer;
       if (buffer.byteLength <= PREFETCH_CACHE_MAX_BYTES) this.cachePrefetchedPage(task.pageIndex, buffer);
       return undefined;
@@ -635,6 +1012,13 @@ export class PdfReaderUi {
       return undefined;
     } finally {
       if (this.prefetchTask === task) this.prefetchTask = undefined;
+      if (this.renderMode === "all" && !task.cancelled
+        && task.generationToken === this.generationToken
+        && this.current?.document_id === doc.document_id
+        && this.current.generation === doc.generation) {
+        if (this.allPrefetchCursor === task.pageIndex) this.allPrefetchCursor++;
+        if (!task.promoted) this.scheduleNextPagePrefetch(this.pageIndex, doc, task.generationToken);
+      }
     }
   }
 
@@ -675,9 +1059,10 @@ export class PdfReaderUi {
     this.cancelPrefetch();
     this.prefetchedPages.clear();
     this.prefetchedBytes = 0;
+    this.allPrefetchCursor = 0;
   }
 
-  async close(): Promise<void> {
+  private async closeCurrentDocument(): Promise<void> {
     const current = this.current;
     ++this.generationToken;
     ++this.renderToken;
@@ -715,6 +1100,7 @@ export class PdfReaderUi {
   }
 
   private clearImage(): void {
+    this.renderedPageIndex = undefined;
     this.image.onload = null;
     this.image.onerror = null;
     this.image.removeAttribute("src");
@@ -738,6 +1124,9 @@ export class PdfReaderUi {
   private updateControls(): void {
     const doc = this.current;
     this.closeButton.disabled = !doc;
+    if (this.zoomInButton) this.zoomInButton.disabled = !doc || this.zoom >= 4;
+    if (this.zoomOutButton) this.zoomOutButton.disabled = !doc || this.zoom <= 0.25;
+    if (this.printButton) this.printButton.disabled = !doc || this.renderedPageIndex !== this.pageIndex;
     this.previousButton.disabled = !doc || this.pageIndex <= 0;
     this.nextButton.disabled = !doc || this.pageIndex >= doc.page_count - 1;
     this.pageNumber.disabled = !doc;
@@ -756,6 +1145,33 @@ export class PdfReaderUi {
     this.bookmarkButton.title = currentIsBookmarked ? "Remove bookmark" : "Bookmark current page";
     this.openButton.disabled = false;
   }
+}
+
+function normalizeLocalPath(path: string): string {
+  return path.toLowerCase().replaceAll("/", String.fromCharCode(92));
+}
+
+function clampZoom(value: number): number {
+  return Number.isFinite(value) ? Math.max(0.25, Math.min(4, value)) : 1;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function readRenderMode(): RenderMode {
+  try {
+    const value = globalThis.localStorage?.getItem(RENDER_MODE_STORAGE_KEY);
+    return value === "current" || value === "all" ? value : "nearby";
+  } catch { return "nearby"; }
+}
+
+function readRecentPaths(): string[] {
+  try {
+    const value: unknown = JSON.parse(globalThis.localStorage?.getItem(RECENT_STORAGE_KEY) ?? "[]");
+    if (!Array.isArray(value)) return [];
+    return value.filter((path): path is string => typeof path === "string" && path.length > 0).slice(0, MAX_RECENT_FILES);
+  } catch { return []; }
 }
 
 function validateTextSearchResponse(value: unknown, pageCount: number): TextSearchResponse {

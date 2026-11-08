@@ -9,10 +9,35 @@
   <body>
     <main class="app-shell" aria-labelledby="app-title">
       <header class="topbar">
-        <div class="brand-lockup"><span class="brand-icon" aria-hidden="true">PDF</span><div><p class="eyebrow">LITHEXPDF READER</p><h1 id="app-title">LitheXPDF</h1></div></div>
+        <div class="brand-lockup">
+          <span class="brand-icon" aria-hidden="true">PDF</span>
+          <div><p class="eyebrow">LITHEXPDF READER</p><h1 id="app-title">LitheXPDF</h1></div>
+        </div>
         <div class="toolbar">
+          <div class="menu-wrap">
+            <button id="menu-button" class="button button-square menu-button" type="button" aria-label="Open main menu" aria-expanded="false" aria-controls="menu-panel" title="Menu">☰</button>
+            <div id="menu-panel" class="menu-panel" role="menu" hidden>
+              <button id="menu-open" class="menu-item" type="button" role="menuitem">Open PDF…</button>
+              <button id="menu-new" class="menu-item" type="button" role="menuitem">New tab…</button>
+              <div class="menu-section-title">Recent</div>
+              <div id="recent-list" class="recent-list"><p class="recent-empty">No recent PDFs</p></div>
+              <div class="menu-separator"></div>
+              <button id="menu-zoom-in" class="menu-item" type="button" role="menuitem">Zoom in</button>
+              <button id="menu-zoom-out" class="menu-item" type="button" role="menuitem">Zoom out</button>
+              <button id="menu-print" class="menu-item" type="button" role="menuitem">Print current page</button>
+              <div class="menu-separator"></div>
+              <button id="menu-settings" class="menu-item" type="button" role="menuitem">Options and settings…</button>
+              <button id="menu-help" class="menu-item" type="button" role="menuitem">Help</button>
+              <button id="menu-about" class="menu-item" type="button" role="menuitem">About LitheXPDF</button>
+            </div>
+          </div>
           <button id="open-button" class="button button-primary" type="button">Open PDF</button>
-          <button id="close-button" class="button" type="button" disabled>Close</button>
+          <button id="close-button" class="button" type="button" disabled>Close tab</button>
+          <span class="toolbar-divider" aria-hidden="true"></span>
+          <button id="zoom-out-button" class="button button-square" type="button" aria-label="Zoom out" title="Zoom out" disabled>−</button>
+          <span id="zoom-level" class="zoom-level" aria-live="polite">100%</span>
+          <button id="zoom-in-button" class="button button-square" type="button" aria-label="Zoom in" title="Zoom in" disabled>+</button>
+          <button id="print-button" class="button" type="button" title="Print current page" disabled>Print</button>
           <span class="toolbar-divider" aria-hidden="true"></span>
           <button id="previous-button" class="button button-square" type="button" aria-label="Previous page" disabled>‹</button>
           <label class="page-jump"><span class="sr-only">Go to page</span><input id="page-number" class="page-number-input" type="number" min="1" step="1" value="1" aria-label="Page number" disabled /><span id="page-total">/ —</span></label>
@@ -27,6 +52,10 @@
           <button id="theme-toggle" class="button theme-toggle" type="button" aria-label="Switch to light theme" aria-pressed="false" title="Switch theme">☀</button>
         </div>
       </header>
+      <nav id="tab-strip" class="tab-strip" role="tablist" aria-label="Open PDF documents">
+        <p id="tabs-empty" class="tabs-empty">No documents open</p>
+        <button id="new-tab-button" class="new-tab-button" type="button" aria-label="Open a PDF in a new tab" title="New tab">+</button>
+      </nav>
       <section class="document-bar">
         <span class="document-mark" aria-hidden="true"></span>
         <p id="document-name">No document open</p>
@@ -51,6 +80,42 @@
       </section>
       <footer class="footer"><span>One active PDFium document</span><span id="page-size"></span></footer>
     </main>
+
+    <dialog id="settings-dialog" class="app-dialog" aria-labelledby="settings-title">
+      <div class="dialog-heading"><div><p class="eyebrow">READER PREFERENCES</p><h2 id="settings-title">Options and settings</h2></div><button class="icon-button" type="button" data-dialog-close aria-label="Close settings">×</button></div>
+      <fieldset class="render-options">
+        <legend>Page rendering</legend>
+        <label class="render-choice"><input type="radio" name="render-mode" value="current" /><span><strong>Current page only</strong><small>No prefetch or extra background rendering. A page renders when you navigate to it.</small></span></label>
+        <label class="render-choice"><input type="radio" name="render-mode" value="nearby" /><span><strong>Current page plus next page</strong><small>Balanced option. After a short idle pause, it prepares one page ahead.</small></span></label>
+        <label class="render-choice"><input type="radio" name="render-mode" value="all" /><span><strong>Progressively render all pages</strong><small>Slowest option with the most background CPU use. It prepares pages one at a time after idle pauses; only a small bounded cache is retained, so older pages may render again when revisited.</small></span></label>
+      </fieldset>
+      <p class="dialog-note">All modes keep one active PDFium document, one render at a time, and a bounded image cache. “All pages” does not keep every page image in memory.</p>
+      <div class="dialog-actions"><button class="button button-primary" type="button" data-dialog-close>Done</button></div>
+    </dialog>
+
+    <dialog id="about-dialog" class="app-dialog" aria-labelledby="about-title">
+      <div class="dialog-heading"><div><p class="eyebrow">ABOUT</p><h2 id="about-title">LitheXPDF</h2></div><button class="icon-button" type="button" data-dialog-close aria-label="Close about">×</button></div>
+      <p class="about-version">Version <span id="app-version">0.1.0</span></p>
+      <div class="developer-card">
+        <strong>Fahad Ibne Fahian</strong>
+        <span>Software Engineer · Finland</span>
+        <a href="mailto:hello@fahadibnefahian.com">hello@fahadibnefahian.com</a>
+        <div class="developer-links"><a href="https://fahadibnefahian.com/" target="_blank" rel="noopener noreferrer">Website</a><a href="https://linkedin.com/in/fahadibnefahian" target="_blank" rel="noopener noreferrer">LinkedIn</a><a href="https://github.com/FahadiF" target="_blank" rel="noopener noreferrer">GitHub</a></div>
+      </div>
+      <div class="dialog-actions"><button class="button button-primary" type="button" data-dialog-close>Done</button></div>
+    </dialog>
+
+    <dialog id="help-dialog" class="app-dialog" aria-labelledby="help-title">
+      <div class="dialog-heading"><div><p class="eyebrow">QUICK GUIDE</p><h2 id="help-title">Help</h2></div><button class="icon-button" type="button" data-dialog-close aria-label="Close help">×</button></div>
+      <ul class="help-list">
+        <li>Open PDFs with <kbd>Ctrl</kbd> + <kbd>O</kbd>; each document opens in a tab.</li>
+        <li>Use the page field, Previous/Next, or scroll through the document.</li>
+        <li>Zoom changes the page display size. Print currently prints the displayed page.</li>
+        <li>Recent file paths are stored locally in this browser profile. Background tabs keep only their file path and view position. The worker opens one PDF at a time.</li>
+      </ul>
+      <div class="dialog-actions"><button class="button button-primary" type="button" data-dialog-close>Done</button></div>
+    </dialog>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

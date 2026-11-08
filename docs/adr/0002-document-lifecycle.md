@@ -3,11 +3,11 @@
 - Status: Accepted
 - Date: 2026-10-12
 
-Milestone 1 implements one active document and deterministic CLOSE/SHUTDOWN
-messages in the worker. The UI does not yet expose background tabs or retain
-tab metadata; the lifecycle below remains the design constraint for later tab
-work. Repeated worker open/close behavior has a 50-cycle functional test, but
-no native-memory or working-set conclusion has been measured.
+Milestone 1 now exposes multiple UI tabs while keeping one active PDFium
+document in the worker. Inactive tabs retain only lightweight view metadata;
+they do not own native objects or page images. Repeated worker open/close
+behavior has a 50-cycle functional test, but tab-switch behavior in the
+WebView2 window and native-memory/working-set effects still require validation.
 
 The current single-document UI also stores bookmarks separately from the
 native document lifecycle: only page numbers and labels are persisted in the
@@ -27,12 +27,13 @@ set.
 
 ## Decision
 
-Keep tab metadata in the host and allow only one active PDFium document in the
-worker. A background tab stores only document path, page index, zoom, scroll
-position, tab ID, and generation. Switching tabs increments the old tab's
-generation, invalidates queued and returned renders, closes its document, and
-only then opens the newly selected path. Reopening a background tab creates a
-new native document and restores the saved view position.
+Keep tab view metadata in the frontend and allow only one active PDFium
+document in the worker. A background tab stores only its ID, document path,
+page index, zoom, and scroll position. The frontend invalidates queued and
+returned renders, waits for an acknowledged CLOSE of the old document, then
+opens the selected path. Reopening a background tab creates a new native
+document and restores the saved view position. The frontend limits one window
+to 100 tabs; recent-file paths are a separate localStorage preference.
 
 Closing or deactivating a tab increments generation before cleanup, purges the
 host's queued work and all encoded/decoded images, and prevents new dispatch.
@@ -60,6 +61,9 @@ host awaits asynchronously.
 
 - Inactive tabs use metadata rather than live PDFium documents and full-page
   bitmaps or encoded/decoded page images.
+- The UI offers current-page, next-page, and progressive all-pages modes. All
+  modes keep the existing single-render and encoded-cache bounds; “all” is a
+  sequential warm-up, not a full-document image cache.
 - Switching tabs requires reopen work and may add latency; measure it.
 - A current native render may finish before an orderly close because PDFium
   calls may not be interruptible.

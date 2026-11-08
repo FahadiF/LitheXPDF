@@ -5,7 +5,7 @@ import { PdfReaderUi } from "./reader";
 import { installThemeToggle } from "./theme";
 
 new PdfReaderUi(document, {
-  pickPdf: () => open({ multiple: false, directory: false, filters: [{ name: "PDF documents", extensions: ["pdf"] }] }),
+  pickPdf: () => open({ multiple: true, directory: false, filters: [{ name: "PDF documents", extensions: ["pdf"] }] }),
   invoke: (command, args) => invoke(command, args),
 });
 installThemeToggle(document.documentElement, (() => {

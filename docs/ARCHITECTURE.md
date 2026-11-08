@@ -2,10 +2,11 @@
 
 ## Milestone 1 implementation status
 
-The current vertical slice has a single open-document UI, native PDF picker,
-page navigation, asynchronous Tauri commands, a supervised worker sidecar, and
-raw binary page responses. It does not implement a tab strip or persistent
-background-tab metadata yet. The worker protocol codec is shared in
+The current UI supports a tab strip and native multi-file picker. It keeps
+lightweight path and view-position state for up to 100 tabs while the host
+supervises exactly one active PDFium document. It includes page navigation,
+per-tab zoom, rendering-mode settings, recent files, current-page printing,
+bookmarks, search, and theme controls. The worker protocol codec is shared in
 `crates/pdfium-protocol`; only the worker links `pdfium-render`. UI/manual
 WebView2 and packaged-install validation status is tracked in `docs/TESTING.md`.
 
@@ -24,10 +25,13 @@ One PDFium worker child process
 ```
 
 The frontend has no PDFium bindings and cannot create native document handles.
-The host owns tab metadata, active-tab selection, request admission, queue
-limits, and worker lifetime. The child owns all PDFium objects and native
-rendering. There is at most one worker and one open PDFium document in the
-initial architecture. Only the active tab may occupy that document slot.
+The frontend owns tab view metadata and active-tab selection; the Rust host
+owns request admission, queue limits, and worker lifetime. The child owns all
+PDFium objects and native rendering. There is at most one worker and one open
+PDFium document. Only the selected tab may occupy that document slot. Switching
+tabs invalidates old frontend requests, acknowledges closure of the current
+native document, opens the selected path, and restores that tab's page, zoom,
+and scroll position.
 
 PDFium's upstream documentation does not promise thread safety. `pdfium-render`
 documents that it serializes PDFium calls behind a mutex when its default
@@ -237,9 +241,9 @@ On worker crash or protocol failure, the host fails all outstanding request
 channels, clears the active document state on the next supervisor transition,
 and does not reuse the worker. A later user open/retry starts a replacement
 only after the old process is confirmed reaped. Restart attempts are capped
-at three. The current single-document UI requires the user to reopen the
-selected path after a crash; automatic reopen and multiple-tab metadata
-recovery remain unimplemented. A hung native call cannot be safely cancelled
+at three. The current tab UI does not automatically reopen the selected path after a
+worker crash; switch away from and back to the selected tab to reopen it.
+Automatic active-tab recovery remains unimplemented. A hung native call cannot be safely cancelled
 in place; the render timeout below causes the supervisor to terminate the
 child process.
 
@@ -288,7 +292,7 @@ and a separately reviewed architecture decision.
 
 ## Continuous page view — 2026-11-08
 
-The single-document reader presents one lightweight DOM slot per page so the
+The tabbed reader presents one lightweight DOM slot per page so the
 full document retains a scroll extent. It requests a bounded full-page render
 for the page nearest the viewport after a short scroll debounce; it does not
 eagerly render every page. One shared image element is moved to the selected
