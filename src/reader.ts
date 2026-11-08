@@ -81,6 +81,8 @@ export class PdfReaderUi {
   private readonly previousButton: HTMLButtonElement;
   private readonly nextButton: HTMLButtonElement;
   private pageSlots: HTMLElement[] = [];
+  private slotUrls: Map<number, string> = new Map();
+  private static readonly MAX_RENDERED_SLOTS = 5; // Number of page slots kept in DOM to limit memory usage
   private current?: OpenPdfResult;
   private pageIndex = 0;
   private objectUrl?: string;
@@ -167,17 +169,59 @@ export class PdfReaderUi {
   }
 
   private createPageSlots(doc: OpenPdfResult): void {
-    this.pageSlots = Array.from({ length: doc.page_count }, (_, index) => {
-      const slot = document.createElement("section");
-      slot.className = "page-slot";
-      slot.dataset.pageIndex = String(index);
-      slot.setAttribute("aria-label", `Page ${index + 1}`);
-      slot.style.aspectRatio = `${doc.page_width_points} / ${doc.page_height_points}`;
-      return slot;
-    });
+    // Initialize a limited pool of page slots to keep memory low.
+    const initialCount = Math.min(PdfReaderUi.MAX_RENDERED_SLOTS, doc.page_count);
+    this.pageSlots = [];
+    for (let i = 0; i < initialCount; i++) {
+      this.pageSlots.push(this.createSlot(i, doc));
+    }
     this.pageStack.replaceChildren(...this.pageSlots);
     this.pageStack.hidden = false;
   }
+
+  /** Create a fresh page slot element for a given page index. */
+  private createSlot(index: number, doc: OpenPdfResult): HTMLElement {
+    const slot = document.createElement('section');
+    slot.className = 'page-slot';
+    slot.dataset.pageIndex = String(index);
+    slot.setAttribute('aria-label', `Page ${index + 1}`);
+    slot.style.aspectRatio = `${doc.page_width_points} / ${doc.page_height_points}`;
+    return slot;
+  }
+
+  /** Retrieve an existing slot for the page or recycle the farthest one. */
+  private getOrCreateSlot(index: number, doc: OpenPdfResult): HTMLElement {
+    // Try to find an existing slot for this index.
+    for (const s of this.pageSlots) {
+      if (Number(s.dataset.pageIndex) === index) return s;
+    }
+    // No slot – recycle the slot farthest from the requested index.
+    let farthest: HTMLElement | null = null;
+    let maxDist = -1;
+    for (const s of this.pageSlots) {
+      const slotIdx = Number(s.dataset.pageIndex);
+      const dist = Math.abs(slotIdx - index);
+      if (dist > maxDist) {
+        maxDist = dist;
+        farthest = s;
+      }
+    }
+    if (farthest) {
+      farthest.dataset.pageIndex = String(index);
+      farthest.setAttribute('aria-label', `Page ${index + 1}`);
+      // Reset aspect ratio based on document dimensions.
+      farthest.style.aspectRatio = `${doc.page_width_points} / ${doc.page_height_points}`;
+      // Remove any previous image child.
+      while (farthest.firstChild) farthest.removeChild(farthest.firstChild);
+      return farthest;
+    }
+    // Fallback – create a new slot (should rarely happen).
+    const newSlot = this.createSlot(index, doc);
+    this.pageSlots.push(newSlot);
+    this.pageStack.appendChild(newSlot);
+    return newSlot;
+  }
+
 
   private scheduleViewportPageRender(): void {
     if (!this.current) return;
@@ -236,20 +280,31 @@ export class PdfReaderUi {
       if (this.activeRequestToken === requestToken) this.activeRequestToken = undefined;
       if (generationToken !== this.generationToken || renderToken !== this.renderToken || this.current?.document_id !== doc.document_id || this.current.generation !== doc.generation || this.pageIndex !== index) return;
       const imageBuffer = parsed.png.slice().buffer as ArrayBuffer;
-      const slot = this.pageSlots[index];
-      slot.style.aspectRatio = `${parsed.width} / ${parsed.height}`;
-      this.objectUrl = (this.bridge.createObjectURL ?? URL.createObjectURL.bind(URL))(new Blob([imageBuffer], { type: "image/png" }));
-      this.image.onload = () => {
+      const slot = this.getOrCreateSlot(index, doc);
+      // Clean previous content in slot.
+      while (slot.firstChild) slot.removeChild(slot.firstChild);
+      const img = document.createElement('img');
+      img.hidden = true;
+      const objectUrl = (this.bridge.createObjectURL ?? URL.createObjectURL.bind(URL))(new Blob([imageBuffer], { type: "image/png" }));
+      // Revoke previous URL for this slot if any.
+      const prevUrl = this.slotUrls.get(index);
+      if (prevUrl) (this.bridge.revokeObjectURL ?? URL.revokeObjectURL.bind(URL))(prevUrl);
+      this.slotUrls.set(index, objectUrl);
+      img.onload = () => {
         if (generationToken === this.generationToken && renderToken === this.renderToken) {
-          this.image.hidden = false;
+          img.hidden = false;
           this.loading.hidden = true;
           this.status.textContent = "Ready";
         }
       };
-      this.image.onerror = () => { if (generationToken === this.generationToken && renderToken === this.renderToken) { this.clearImage(); this.loading.hidden = true; this.showError("The rendered page could not be decoded by WebView2."); } };
-      slot.append(this.image);
-      this.image.hidden = true;
-      this.image.src = this.objectUrl;
+      img.onerror = () => {
+        if (generationToken === this.generationToken && renderToken === this.renderToken) {
+          this.loading.hidden = true;
+          this.showError("The rendered page could not be decoded by WebView2.");
+        }
+      };
+      img.src = objectUrl;
+      slot.appendChild(img);
     } catch (error) {
       if (this.activeRequestToken === requestToken) this.activeRequestToken = undefined;
       if (generationToken === this.generationToken && renderToken === this.renderToken) { this.loading.hidden = true; this.showError(error); }
