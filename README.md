@@ -4,6 +4,8 @@ LitheXPDF is an early-stage Windows PDF reader built with Rust, Tauri 2, TypeScr
 
 **Light on memory. Fast through documents.** That is the goal for the app, not a measured performance claim yet.
 
+<img width="1918" height="1030" alt="image" src="https://github.com/user-attachments/assets/30f67034-fe45-4707-9d7c-bcc202eee6d1" />
+
 ## Current status
 
 The current reader connects the interface to a Rust host and a separate PDFium worker. It permits up to 100 document tabs in one window while keeping only one PDFium document active; inactive tabs retain path and view-position metadata. The reader includes continuous scrolling, page navigation, per-tab zoom, text search, bookmarks, dark/light themes, recent files, page preloading controls, and current-page printing. The default preloads up to 12 pages ahead in the active document, with lower and higher bounded settings available; inactive tabs are not prefetched. Search runs inside the worker and returns bounded text metadata; scanned pages without an embedded text layer are not searchable. All-page and page-range printing, menu interaction, bookmark-panel interaction, and the new preloading settings still need manual WebView2 review. PDFium compatibility beyond the exercised calls, broad document coverage, and clean-machine packaging remain open, so LitheXPDF is not ready as a packaged release.
