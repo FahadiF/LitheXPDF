@@ -2,6 +2,7 @@
 name = "pdfium-protocol"
 version = "0.1.0"
 description = "Bounded LitheXPDF host-worker binary protocol"
+license = "MIT"
 edition = "2021"
 rust-version = "1.90"
 

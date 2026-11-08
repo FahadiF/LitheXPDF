@@ -6,7 +6,7 @@ LitheXPDF is an early-stage Windows PDF reader built with Rust, Tauri 2, TypeScr
 
 ## Current status
 
-The current reader connects the interface to a Rust host and a separate PDFium worker. It permits up to 100 document tabs in one window while keeping only one PDFium document active; inactive tabs retain path and view-position metadata. The reader includes continuous scrolling, page navigation, per-tab zoom, text search, bookmarks, dark/light themes, recent files, rendering modes, and current-page printing. Search runs inside the worker and returns bounded text metadata; scanned pages without an embedded text layer are not searchable. The new tab and menu workflow still needs manual WebView2 review. PDFium compatibility beyond the exercised calls, broad document coverage, and clean-machine packaging remain open, so LitheXPDF is not ready as a packaged release.
+The current reader connects the interface to a Rust host and a separate PDFium worker. It permits up to 100 document tabs in one window while keeping only one PDFium document active; inactive tabs retain path and view-position metadata. The reader includes continuous scrolling, page navigation, per-tab zoom, text search, bookmarks, dark/light themes, recent files, rendering modes, and current-page printing. Search runs inside the worker and returns bounded text metadata; scanned pages without an embedded text layer are not searchable. All-page and page-range printing, menu interaction and bookmark-panel interaction still need completion and manual WebView2 review. PDFium compatibility beyond the exercised calls, broad document coverage, and clean-machine packaging remain open, so LitheXPDF is not ready as a packaged release.
 
 PDFium integration currently uses a specific `pdfium-render` and PDFium pairing. Compatibility beyond the calls verified so far, and reliable setup on a clean machine, still need validation. See the [testing plan](docs/TESTING.md) for current checks and release gates.
 
@@ -62,4 +62,4 @@ The memory and speed goal will need representative benchmarks before the project
 
 ## License
 
-No license has been selected for the LitheXPDF project source. Do not assume it is offered under an open-source license. The bundled PDFium runtime is a separate third-party component with its notices in `src-tauri/resources/pdfium/THIRD_PARTY_NOTICES.txt`.
+LitheXPDF project source is licensed under the [MIT License](LICENSE). The bundled PDFium runtime is a separate third-party component with its own notices in `src-tauri/resources/pdfium/THIRD_PARTY_NOTICES.txt`.

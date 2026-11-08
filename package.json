@@ -2,6 +2,7 @@
   "name": "lithexpdf",
   "private": true,
   "version": "0.1.0",
+  "license": "MIT",
   "description": "Early-stage Windows PDF reader built with Rust, Tauri 2, TypeScript, and PDFium",
   "packageManager": "pnpm@11.25.0",
   "scripts": {

@@ -136,6 +136,9 @@ export class PdfReaderUi {
   private readonly newTabButton: HTMLButtonElement | null;
   private readonly menuButton: HTMLButtonElement | null;
   private readonly menuPanel: HTMLElement | null;
+  private readonly recentMenuWrap: HTMLElement | null;
+  private readonly recentTrigger: HTMLButtonElement | null;
+  private readonly recentSubmenu: HTMLElement | null;
   private readonly recentList: HTMLElement | null;
   private readonly zoomInButton: HTMLButtonElement | null;
   private readonly zoomOutButton: HTMLButtonElement | null;
@@ -202,6 +205,9 @@ export class PdfReaderUi {
     this.newTabButton = this.optional<HTMLButtonElement>("#new-tab-button");
     this.menuButton = this.optional<HTMLButtonElement>("#menu-button");
     this.menuPanel = this.optional("#menu-panel");
+    this.recentMenuWrap = this.optional(".recent-menu-wrap");
+    this.recentTrigger = this.optional<HTMLButtonElement>("#recent-trigger");
+    this.recentSubmenu = this.optional("#recent-submenu");
     this.recentList = this.optional("#recent-list");
     this.zoomInButton = this.optional<HTMLButtonElement>("#zoom-in-button");
     this.zoomOutButton = this.optional<HTMLButtonElement>("#zoom-out-button");
@@ -216,6 +222,22 @@ export class PdfReaderUi {
     this.zoomOutButton?.addEventListener("click", () => this.changeZoom(-0.1));
     this.printButton?.addEventListener("click", () => this.printCurrentPage());
     this.menuButton?.addEventListener("click", () => this.setMenuOpen(this.menuPanel?.hidden ?? true));
+    this.recentMenuWrap?.addEventListener("pointerenter", () => this.setRecentMenuOpen(true));
+    this.recentMenuWrap?.addEventListener("pointerleave", () => this.setRecentMenuOpen(false));
+    this.recentMenuWrap?.addEventListener("focusin", () => this.setRecentMenuOpen(true));
+    this.recentMenuWrap?.addEventListener("focusout", (event) => {
+      const nextTarget = (event as FocusEvent).relatedTarget;
+      if (!(nextTarget instanceof Node) || !this.recentMenuWrap?.contains(nextTarget)) this.setRecentMenuOpen(false);
+    });
+    this.recentTrigger?.addEventListener("click", () => this.setRecentMenuOpen(true));
+    this.recentMenuWrap?.addEventListener("keydown", (event) => {
+      if ((event as KeyboardEvent).key === "Escape") {
+        event.preventDefault();
+        this.setRecentMenuOpen(false);
+        this.recentTrigger?.focus();
+      }
+    });
+    this.optional<HTMLButtonElement>("#clear-recent")?.addEventListener("click", () => this.clearRecentPaths());
     this.optional<HTMLButtonElement>("#menu-open")?.addEventListener("click", () => { this.setMenuOpen(false); void this.openPicker(); });
     this.optional<HTMLButtonElement>("#menu-new")?.addEventListener("click", () => { this.setMenuOpen(false); void this.openPicker(); });
     this.optional<HTMLButtonElement>("#menu-zoom-in")?.addEventListener("click", () => { this.setMenuOpen(false); this.changeZoom(0.1); });
@@ -336,6 +358,13 @@ export class PdfReaderUi {
     this.renderRecentMenu();
   }
 
+  private clearRecentPaths(): void {
+    this.recentPaths = [];
+    try { this.appDocument().defaultView?.localStorage.removeItem(RECENT_STORAGE_KEY); } catch { /* Recent files remain cleared for this session. */ }
+    this.renderRecentMenu();
+    this.setRecentMenuOpen(true);
+  }
+
   private renderRecentMenu(): void {
     if (!this.recentList) return;
     this.recentList.replaceChildren();
@@ -365,6 +394,13 @@ export class PdfReaderUi {
     if (!this.menuPanel) return;
     this.menuPanel.hidden = !open;
     this.menuButton?.setAttribute("aria-expanded", String(open));
+    if (!open) this.setRecentMenuOpen(false);
+  }
+
+  private setRecentMenuOpen(open: boolean): void {
+    if (!this.recentSubmenu) return;
+    this.recentSubmenu.hidden = !open;
+    this.recentTrigger?.setAttribute("aria-expanded", String(open));
   }
 
   private showDialog(selector: string): void {
@@ -751,9 +787,19 @@ export class PdfReaderUi {
   }
 
   private setBookmarksPanel(open: boolean): void {
+    if (open && !this.current) return;
+    const restoreFocus = !open && this.bookmarksPanel.contains(this.appDocument().activeElement);
     this.bookmarksPanel.hidden = !open;
     this.bookmarksToggle.setAttribute("aria-expanded", String(open));
-    if (open) this.searchPanel.hidden = true;
+    if (open) {
+      this.searchPanel.hidden = true;
+      this.renderBookmarks();
+      this.appDocument().defaultView?.requestAnimationFrame(() => {
+        if (!this.bookmarksPanel.hidden) this.bookmarksPanel.focus();
+      });
+    } else if (restoreFocus && !this.bookmarksToggle.disabled) {
+      this.bookmarksToggle.focus();
+    }
   }
 
   private startSearch(immediate: boolean): void {

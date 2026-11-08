@@ -221,3 +221,32 @@ PDFs, switching tabs and restoring page/zoom/scroll state, closing active and
 inactive tabs, selecting each rendering mode, zoom limits, the native print
 dialog/current-page output, About links, and behavior with 30–50 tabs. The
 all-pages mode's CPU impact and full-workload memory use remain unmeasured.
+
+### Menu, bookmarks, and source-license follow-up — 2026-11-08
+
+The menu now sits at the left of the top bar with a text label. Recent files
+are exposed through a right-side submenu with a Clear recent action, and the
+options label is shortened. The bookmarks panel now refreshes when opened,
+announces its state to assistive technology, and receives keyboard focus. These
+changes have not yet been exercised in a running WebView2 window. The menu and
+bookmark interactions remain pending manual verification.
+
+The project source now uses the MIT License, selected by the project owner.
+This license does not replace or change the separate PDFium runtime notices.
+The About dialog identifies the developer and links the project license.
+
+Printing still sends only the displayed page to the WebView print dialog.
+Printer and paper settings depend on the available system print dialog and
+printer. Full-document and page-range printing are not implemented; the
+current page-only raster path cannot safely be presented as whole-document
+printing under the existing memory policy.
+
+Checks run for this follow-up:
+
+| Command | Result |
+| --- | --- |
+| `pnpm typecheck` | Passed, exit 0 |
+| `pnpm build` | Passed, exit 0 |
+| `pnpm test` | Not run |
+| Desktop window review | Not available in this session; manual verification remains required |
+| `git diff --check` | Passed, exit 0; Git reported its configured LF-to-CRLF conversion warnings |

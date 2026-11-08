@@ -9,28 +9,36 @@
   <body>
     <main class="app-shell" aria-labelledby="app-title">
       <header class="topbar">
-        <div class="brand-lockup">
-          <span class="brand-icon" aria-hidden="true">PDF</span>
-          <div><p class="eyebrow">LITHEXPDF READER</p><h1 id="app-title">LitheXPDF</h1></div>
-        </div>
-        <div class="toolbar">
+        <div class="topbar-leading">
           <div class="menu-wrap">
-            <button id="menu-button" class="button button-square menu-button" type="button" aria-label="Open main menu" aria-expanded="false" aria-controls="menu-panel" title="Menu">☰</button>
+            <button id="menu-button" class="button menu-button" type="button" aria-label="Open main menu" aria-expanded="false" aria-controls="menu-panel" title="Menu"><span aria-hidden="true">☰</span><span>Menu</span></button>
             <div id="menu-panel" class="menu-panel" role="menu" hidden>
               <button id="menu-open" class="menu-item" type="button" role="menuitem">Open PDF…</button>
               <button id="menu-new" class="menu-item" type="button" role="menuitem">New tab…</button>
-              <div class="menu-section-title">Recent</div>
-              <div id="recent-list" class="recent-list"><p class="recent-empty">No recent PDFs</p></div>
-              <div class="menu-separator"></div>
+              <div class="recent-menu-wrap">
+                <button id="recent-trigger" class="menu-item recent-trigger" type="button" role="menuitem" aria-expanded="false" aria-controls="recent-submenu"><span>Recent documents</span><span class="submenu-arrow" aria-hidden="true">›</span></button>
+                <div id="recent-submenu" class="recent-submenu" role="menu" hidden>
+                  <button id="clear-recent" class="menu-item" type="button" role="menuitem">Clear recent</button>
+                  <div class="menu-separator" role="separator"></div>
+                  <div id="recent-list" class="recent-list"><p class="recent-empty">No recent PDFs</p></div>
+                </div>
+              </div>
+              <div class="menu-separator" role="separator"></div>
               <button id="menu-zoom-in" class="menu-item" type="button" role="menuitem">Zoom in</button>
               <button id="menu-zoom-out" class="menu-item" type="button" role="menuitem">Zoom out</button>
-              <button id="menu-print" class="menu-item" type="button" role="menuitem">Print current page</button>
-              <div class="menu-separator"></div>
-              <button id="menu-settings" class="menu-item" type="button" role="menuitem">Options and settings…</button>
+              <button id="menu-print" class="menu-item" type="button" role="menuitem">Print current page…</button>
+              <div class="menu-separator" role="separator"></div>
+              <button id="menu-settings" class="menu-item" type="button" role="menuitem">Options</button>
               <button id="menu-help" class="menu-item" type="button" role="menuitem">Help</button>
               <button id="menu-about" class="menu-item" type="button" role="menuitem">About LitheXPDF</button>
             </div>
           </div>
+          <div class="brand-lockup">
+            <span class="brand-icon" aria-hidden="true">PDF</span>
+            <div><p class="eyebrow">LITHEXPDF READER</p><h1 id="app-title">LitheXPDF</h1></div>
+          </div>
+        </div>
+        <div class="toolbar">
           <button id="open-button" class="button button-primary" type="button">Open PDF</button>
           <button id="close-button" class="button" type="button" disabled>Close tab</button>
           <span class="toolbar-divider" aria-hidden="true"></span>
@@ -71,7 +79,7 @@
           <p id="search-summary" role="status" aria-live="polite"></p>
           <ol id="search-results" class="result-list"></ol>
         </aside>
-        <aside id="bookmarks-panel" class="side-panel" aria-labelledby="bookmarks-panel-title" hidden>
+        <aside id="bookmarks-panel" class="side-panel" aria-labelledby="bookmarks-panel-title" aria-live="polite" tabindex="-1" hidden>
           <div class="side-panel-heading"><h2 id="bookmarks-panel-title">Bookmarks</h2><button id="bookmarks-panel-close" class="icon-button" type="button" aria-label="Close bookmarks">×</button></div>
           <p id="bookmarks-empty" class="panel-empty">No bookmarks yet.</p>
           <ul id="bookmark-list" class="bookmark-list"></ul>
@@ -82,7 +90,7 @@
     </main>
 
     <dialog id="settings-dialog" class="app-dialog" aria-labelledby="settings-title">
-      <div class="dialog-heading"><div><p class="eyebrow">READER PREFERENCES</p><h2 id="settings-title">Options and settings</h2></div><button class="icon-button" type="button" data-dialog-close aria-label="Close settings">×</button></div>
+      <div class="dialog-heading"><div><p class="eyebrow">READER PREFERENCES</p><h2 id="settings-title">Options</h2></div><button class="icon-button" type="button" data-dialog-close aria-label="Close options">×</button></div>
       <fieldset class="render-options">
         <legend>Page rendering</legend>
         <label class="render-choice"><input type="radio" name="render-mode" value="current" /><span><strong>Current page only</strong><small>No prefetch or extra background rendering. A page renders when you navigate to it.</small></span></label>
@@ -97,10 +105,12 @@
       <div class="dialog-heading"><div><p class="eyebrow">ABOUT</p><h2 id="about-title">LitheXPDF</h2></div><button class="icon-button" type="button" data-dialog-close aria-label="Close about">×</button></div>
       <p class="about-version">Version <span id="app-version">0.1.0</span></p>
       <div class="developer-card">
+        <span class="developer-label">Developed by</span>
         <strong>Fahad Ibne Fahian</strong>
         <span>Software Engineer · Finland</span>
         <a href="mailto:hello@fahadibnefahian.com">hello@fahadibnefahian.com</a>
         <div class="developer-links"><a href="https://fahadibnefahian.com/" target="_blank" rel="noopener noreferrer">Website</a><a href="https://linkedin.com/in/fahadibnefahian" target="_blank" rel="noopener noreferrer">LinkedIn</a><a href="https://github.com/FahadiF" target="_blank" rel="noopener noreferrer">GitHub</a></div>
+        <p class="license-summary">Open-source software under the <a href="https://opensource.org/license/mit" target="_blank" rel="noopener noreferrer">MIT License</a>.</p>
       </div>
       <div class="dialog-actions"><button class="button button-primary" type="button" data-dialog-close>Done</button></div>
     </dialog>
@@ -110,7 +120,7 @@
       <ul class="help-list">
         <li>Open PDFs with <kbd>Ctrl</kbd> + <kbd>O</kbd>; each document opens in a tab.</li>
         <li>Use the page field, Previous/Next, or scroll through the document.</li>
-        <li>Zoom changes the page display size. Print currently prints the displayed page.</li>
+        <li>Print opens the system print dialog for the displayed page; printer and paper options depend on the selected printer. All-page and page-range printing are not available yet.</li>
         <li>Recent file paths are stored locally in this browser profile. Background tabs keep only their file path and view position. The worker opens one PDF at a time.</li>
       </ul>
       <div class="dialog-actions"><button class="button button-primary" type="button" data-dialog-close>Done</button></div>
