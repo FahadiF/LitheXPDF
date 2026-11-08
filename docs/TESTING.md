@@ -576,3 +576,31 @@ compatibility claim is made for them. The active `8086` runtime was retained
 for this milestone as requested; evaluate 8100 in a separately reviewed
 compatibility follow-up before changing the pinned artifact.
 
+### Desktop startup and final automated rerun — 2026-10-19
+
+The requested final checks were rerun from the repository root: `pnpm
+typecheck`, `pnpm test` (4 passed), `pnpm build`, `cargo check --workspace
+--all-targets`, `cargo test --workspace` (30 passed),
+`cargo build --release --target x86_64-pc-windows-msvc -p pdfium-worker`,
+`node scripts/stage-worker-windows.mjs`, and `git diff --check` all exited 0.
+The sidecar script staged
+`src-tauri/binaries/pdfium-worker-x86_64-pc-windows-msvc.exe`.
+
+`pnpm tauri dev` started Vite (`127.0.0.1:1420`) and logged the Tauri host
+launch command. A local HTTP request to Vite returned status 200 and the
+`LitheXPDF` page title. The dev command remains running for interactive use.
+The PDF worker is lazy-started on the first open command, so no worker launch
+or render logs exist before a PDF is selected. This environment exposes no
+`node_repl` Computer Use tool; the native window and controls were not
+interacted with, and no visible page or navigation was verified. Do not treat
+the successful build, launch log, or Vite response as proof of a usable reader.
+
+For manual verification in the running window, open
+`crates/pdfium-worker/tests/fixtures/smoke-two-page.pdf`, check the displayed
+`1 / 2` page and image, use Next then Previous and confirm the image changes,
+then open `crates/pdfium-worker/tests/fixtures/smoke-one-page.pdf`. Open
+`target/invalid-smoke.pdf` to check the error state, then reopen the valid
+fixture. Close the document and confirm the image clears; check that one
+`pdfium-worker` process exits on close, and that the process also exits when
+the app is shut down. These are pending manual checks, not recorded results.
+
