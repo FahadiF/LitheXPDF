@@ -250,3 +250,31 @@ Checks run for this follow-up:
 | `pnpm test` | Not run |
 | Desktop window review | Not available in this session; manual verification remains required |
 | `git diff --check` | Passed, exit 0; Git reported its configured LF-to-CRLF conversion warnings |
+
+### Active-document preloading settings — 2026-11-08
+
+The previous choices appeared alike because they all waited one second, only
+prefetched the immediate next page, and retained at most two responses. The
+No preloading choice also still consumed frames already in that cache. The
+implementation now has four observable active-document windows: 0, 3, 12
+(default), and up to 30 pages. Selecting 0 clears cached responses. Initial
+warm-up starts after one second; after navigation and between successful
+prefetches, it continues serially with 40 ms gaps. It remains subject to one
+active render and a shared 64 MiB/30-page encoded cache limit. Switching tabs
+still clears the old document's cache; inactive tabs are not prefetched. The
+preference key is versioned so existing installs receive the new 12-page
+default once; new choices persist under the updated key.
+
+The new settings and cache limit are implementation changes, not measured
+memory or speed improvements. Checks run for this change:
+
+| Command | Result |
+| --- | --- |
+| `pnpm typecheck` | Passed, exit 0 |
+| `pnpm build` | Passed, exit 0 |
+| `pnpm test` | Not run |
+| Desktop WebView2 review | Not performed; manual comparison of all four choices remains outstanding |
+| `git diff --check` | Passed, exit 0; Git reported its configured LF-to-CRLF conversion warnings |
+
+Verify idle warm-up, normal scrolling, a jump past the cache window, switching
+tabs, and No preloading after a prior mode has filled the cache.

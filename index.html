@@ -93,11 +93,12 @@
       <div class="dialog-heading"><div><p class="eyebrow">READER PREFERENCES</p><h2 id="settings-title">Options</h2></div><button class="icon-button" type="button" data-dialog-close aria-label="Close options">×</button></div>
       <fieldset class="render-options">
         <legend>Page rendering</legend>
-        <label class="render-choice"><input type="radio" name="render-mode" value="current" /><span><strong>Current page only</strong><small>No prefetch or extra background rendering. A page renders when you navigate to it.</small></span></label>
-        <label class="render-choice"><input type="radio" name="render-mode" value="nearby" /><span><strong>Current page plus next page</strong><small>Balanced option. After a short idle pause, it prepares one page ahead.</small></span></label>
-        <label class="render-choice"><input type="radio" name="render-mode" value="all" /><span><strong>Progressively render all pages</strong><small>Slowest option with the most background CPU use. It prepares pages one at a time after idle pauses; only a small bounded cache is retained, so older pages may render again when revisited.</small></span></label>
+        <label class="render-choice"><input type="radio" name="render-mode" value="current" /><span><strong>No preloading</strong><small>Uses the least background CPU and encoded cache. A page starts rendering when you navigate to it.</small></span></label>
+        <label class="render-choice"><input type="radio" name="render-mode" value="nearby" /><span><strong>Light · up to 3 pages ahead</strong><small>Lower memory use. Starts after one second, then keeps nearby pages ready as you move through the document.</small></span></label>
+        <label class="render-choice"><input type="radio" name="render-mode" value="balanced" /><span><strong>Recommended · up to 12 pages ahead</strong><small>Default. Starts after one second, then keeps filling the active document's look-ahead window as you scroll.</small></span></label>
+        <label class="render-choice"><input type="radio" name="render-mode" value="maximum" /><span><strong>Maximum · up to 30 pages ahead</strong><small>Highest background CPU and cache use. Short documents may fit entirely; long documents use a rolling window and prepare more as you move through them.</small></span></label>
       </fieldset>
-      <p class="dialog-note">All modes keep one active PDFium document, one render at a time, and a bounded image cache. “All pages” does not keep every page image in memory.</p>
+      <p class="dialog-note">The encoded page cache is capped at 64 MiB and 30 pages. Only the active document is preloaded; inactive tabs keep metadata only and render after you switch to them. Changing to No preloading clears existing prefetched pages. Higher settings use more background CPU and can use more memory; these limits are initial targets, not measured savings.</p>
       <div class="dialog-actions"><button class="button button-primary" type="button" data-dialog-close>Done</button></div>
     </dialog>
 

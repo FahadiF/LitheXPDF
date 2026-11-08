@@ -177,17 +177,20 @@ Render a full page only, with width and height each at most 8,192 px, at most
 writer with a hard 32 MiB output cap. If the cap is exceeded, abort encoding,
 discard partial output, and return `IMAGE_TOO_LARGE`; do not retry at a larger
 size or stream an unbounded response. Keep at most one result awaiting the
-frontend. The frontend may retain at most two validated encoded page responses,
-with a 16 MiB total cap, for the active document. A response above that cap is
-displayed only when directly requested and is not cached. In nearby mode, one second of idle time schedules only the immediately
-following page. In all-pages mode, remaining pages are prefetched sequentially,
-one request at a time, with the same delay and cache limits. Foreground work
-may wait for a native render already in progress; PDFium calls cannot be
-cancelled in place. On document replacement or close, clear all cached bytes
-and decoded WebView image references, clear the image source, and revoke its
-object URL. Inactive background tabs retain no encoded or decoded page images.
-Never store image data in tab metadata or persist it to disk. All-pages mode
-does not raise the worker queue limit or retain the full document's image set.
+frontend. The frontend may retain validated encoded page responses only for
+the active document, with a 64 MiB hard cache cap and a mode-specific
+look-ahead of 0, 3, 12 (default), or up to 30 pages. A response above the
+protocol's 32 MiB image cap is not cached. After one second of idle time
+following the initial page display or a mode change, the frontend fills the
+selected window serially. Following user navigation or a successful prefetch,
+it continues after 40 ms. When the byte cap is reached it evicts the farthest
+cached page. Foreground work may wait for a native render already in progress;
+PDFium calls cannot be cancelled in place. On document replacement or close,
+clear all cached bytes and decoded WebView image references, clear the image
+source, and revoke its object URL. Inactive background tabs retain no encoded
+or decoded page images. Never store image data in tab metadata or persist it to
+disk. The maximum look-ahead remains bounded by both the 30-page and 64 MiB
+limits; it does not retain all images of a longer document.
 
 The initial renderer is bounded full-page rendering. Do not add tile/partial
 rendering, multiple live documents, or additional renderer workers without

@@ -298,16 +298,24 @@ for the page nearest the viewport after a short scroll debounce; it does not
 eagerly render every page. One shared image element is moved to the selected
 slot, and page navigation scrolls that slot into view. The host supplies a
 maximum render box; the worker fits the actual page dimensions within that box
-while preserving aspect ratio and the existing pixel/dimension caps. After a
-page response is installed, the frontend waits one second of idle time before
-requesting only the immediately following page. It retains at most two
-validated encoded responses, capped at 16 MiB total; an individual response
-larger than that is not cached. It keeps one decoded image/object URL, clears
-prefetch state on document replacement or close, and cancels queued prefetch
-work when navigation changes. Page transitions do not display the centered
-initial-open loader and keep the prior image until the replacement response is
-validated. This remains full-page rendering with one active image; eager
-whole-document rendering, tiles, parallel renderers, and multiple live
+while preserving aspect ratio and the existing pixel/dimension caps. After the
+initial page or a changed setting, the frontend waits one second before
+prefetching. After user navigation or a successful prefetch, it continues after
+a 40 ms gap, serially filling the selected window: 0 pages, 3 pages, 12 pages
+by default, or up to 30 pages. It retains at most 64 MiB of validated encoded
+responses for the active document. Selecting no preloading clears the cache;
+changing modes trims it to the new limit. The worker still renders one page at
+a time.
+The active viewport stays the render priority: navigation cancels queued
+prefetch work and promotes an already-running matching page request. Inactive
+tabs retain metadata only and are rendered after activation; no page images are
+kept for background tabs. The cache has explicit limits but the new 64 MiB
+target is not a measured memory result. It keeps one decoded image/object URL,
+clears prefetch state on document replacement or close, and cancels queued
+prefetch work when navigation changes. Page transitions do not display the
+centered initial-open loader and keep the prior image until the replacement
+response is validated. This remains full-page rendering with one active image;
+eager whole-document retention, tiles, parallel renderers, and multiple live
 documents are not part of this change. A five-slot DOM
 experiment was reverted because it cut off full-document navigation. Runtime
 UI verification and memory measurement remain pending.

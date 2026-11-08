@@ -61,9 +61,11 @@ host awaits asynchronously.
 
 - Inactive tabs use metadata rather than live PDFium documents and full-page
   bitmaps or encoded/decoded page images.
-- The UI offers current-page, next-page, and progressive all-pages modes. All
-  modes keep the existing single-render and encoded-cache bounds; “all” is a
-  sequential warm-up, not a full-document image cache.
+- The UI offers active-document look-ahead windows of 0, 3, 12 (default), and
+  up to 30 pages, subject to the 64 MiB encoded-cache cap. Inactive tabs retain
+  no rendered images. These settings change prefetch depth, not the one-active-
+  document lifecycle or single-render limit. The 64 MiB cap is an initial
+  target that still needs memory measurement.
 - Switching tabs requires reopen work and may add latency; measure it.
 - A current native render may finish before an orderly close because PDFium
   calls may not be interruptible.
