@@ -111,6 +111,142 @@ describe("reader image lifecycle", () => {
     expect(document.querySelectorAll(".page-slot")).toHaveLength(0);
   });
 
+  it("does not show the centered loader or clear the current image while navigating", async () => {
+    let releaseRender!: (value: ArrayBuffer) => void;
+    const bridge: ReaderBridge = {
+      pickPdf: async () => null,
+      invoke: vi.fn(async (command: string, args?: Record<string, unknown>) => {
+        if (command === "open_pdf") return { document_id: id, generation: 7, page_count: 2, page_width_points: 612, page_height_points: 792 } as never;
+        if (command === "render_page" && args?.pageIndex === 1) return await new Promise<ArrayBuffer>((resolve) => { releaseRender = resolve; }) as never;
+        if (command === "render_page") return pageFrame(0) as never;
+        return undefined as never;
+      }),
+      createObjectURL: () => "blob:navigation",
+      revokeObjectURL: vi.fn(),
+    };
+    const ui = new PdfReaderUi(document, bridge);
+    await ui.open("C:\\navigation.pdf");
+    const image = document.querySelector<HTMLImageElement>("#page-image")!;
+    image.dispatchEvent(new Event("load"));
+    const originalSrc = image.src;
+    document.querySelector<HTMLButtonElement>("#next-button")!.click();
+    await Promise.resolve();
+    expect(document.querySelector<HTMLElement>("#loading-state")?.hidden).toBe(true);
+    expect(image.src).toBe(originalSrc);
+    releaseRender(pageFrame(1));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(image.src).toBe("blob:navigation");
+    await ui.close();
+  });
+
+  it("prefetches one page after one second of idle time and reuses its bounded encoded response", async () => {
+    vi.useFakeTimers();
+    const calls: number[] = [];
+    let urls = 0;
+    const bridge: ReaderBridge = {
+      pickPdf: async () => null,
+      invoke: vi.fn(async (command: string, args?: Record<string, unknown>) => {
+        if (command === "open_pdf") return { document_id: id, generation: 7, page_count: 3, page_width_points: 612, page_height_points: 792 } as never;
+        if (command === "render_page") {
+          const pageIndex = Number(args?.pageIndex ?? 0);
+          calls.push(pageIndex);
+          return pageFrame(pageIndex) as never;
+        }
+        return undefined as never;
+      }),
+      createObjectURL: () => "blob:prefetch-" + (++urls),
+      revokeObjectURL: vi.fn(),
+    };
+    try {
+      const ui = new PdfReaderUi(document, bridge);
+      await ui.open("C:\\prefetch.pdf");
+      await vi.advanceTimersByTimeAsync(999);
+      expect(calls).toEqual([0]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(calls).toEqual([0, 1]);
+      expect(urls).toBe(1);
+      document.querySelector<HTMLButtonElement>("#next-button")!.click();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(calls).toEqual([0, 1]);
+      expect(urls).toBe(2);
+      await ui.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("discards an in-flight prefetched result after navigation changes", async () => {
+    vi.useFakeTimers();
+    let releasePrefetch!: (value: ArrayBuffer) => void;
+    const calls: number[] = [];
+    let urls = 0;
+    const bridge: ReaderBridge = {
+      pickPdf: async () => null,
+      invoke: vi.fn(async (command: string, args?: Record<string, unknown>) => {
+        if (command === "open_pdf") return { document_id: id, generation: 7, page_count: 3, page_width_points: 612, page_height_points: 792 } as never;
+        if (command === "render_page") {
+          const pageIndex = Number(args?.pageIndex ?? 0);
+          calls.push(pageIndex);
+          if (pageIndex === 1) return await new Promise<ArrayBuffer>((resolve) => { releasePrefetch = resolve; }) as never;
+          return pageFrame(pageIndex) as never;
+        }
+        return undefined as never;
+      }),
+      createObjectURL: () => "blob:stale-" + (++urls),
+      revokeObjectURL: vi.fn(),
+    };
+    try {
+      const ui = new PdfReaderUi(document, bridge);
+      await ui.open("C:\\stale-prefetch.pdf");
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(calls).toEqual([0, 1]);
+
+      const next = document.querySelector<HTMLButtonElement>("#next-button")!;
+      next.click(); // Promote the in-flight render for page 2.
+      next.click(); // Move away before that render completes.
+      await Promise.resolve();
+      await Promise.resolve();
+      releasePrefetch(pageFrame(1));
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(calls).toEqual([0, 1, 2]);
+      expect(document.querySelector<HTMLInputElement>("#page-number")?.value).toBe("3");
+      expect(urls).toBe(2);
+      await ui.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels the delayed prefetch when the document closes", async () => {
+    vi.useFakeTimers();
+    const calls: number[] = [];
+    const bridge: ReaderBridge = {
+      pickPdf: async () => null,
+      invoke: vi.fn(async (command: string, args?: Record<string, unknown>) => {
+        if (command === "open_pdf") return { document_id: id, generation: 7, page_count: 2, page_width_points: 612, page_height_points: 792 } as never;
+        if (command === "render_page") {
+          calls.push(Number(args?.pageIndex ?? 0));
+          return pageFrame(Number(args?.pageIndex ?? 0)) as never;
+        }
+        return undefined as never;
+      }),
+      createObjectURL: () => "blob:close-prefetch",
+      revokeObjectURL: vi.fn(),
+    };
+    try {
+      const ui = new PdfReaderUi(document, bridge);
+      await ui.open("C:\\close-prefetch.pdf");
+      await ui.close();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(calls).toEqual([0]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("shows an error and leaves no stale image when render fails", async () => {
     const bridge: ReaderBridge = {
       pickPdf: async () => null,

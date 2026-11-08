@@ -177,11 +177,14 @@ Render a full page only, with width and height each at most 8,192 px, at most
 writer with a hard 32 MiB output cap. If the cap is exceeded, abort encoding,
 discard partial output, and return `IMAGE_TOO_LARGE`; do not retry at a larger
 size or stream an unbounded response. Keep at most one result awaiting the
-frontend. The frontend may retain a byte-accounted 64 MiB encoded LRU for the
-active tab only. On deactivation, clear that tab's encoded cache and all
-decoded WebView image references, clear image element sources, and revoke
-object URLs before switching. Inactive tabs retain no full-page encoded or
-decoded images. Never store image data in tab metadata or persist it to disk.
+frontend. The frontend may retain at most two validated encoded page responses,
+with a 16 MiB total cap, for the active document. A response above that cap is
+displayed only when directly requested and is not cached. After one second of
+idle time, only the immediately following page may be prefetched. On document
+replacement or close, clear all cached bytes and decoded WebView image
+references, clear the image source, and revoke its object URL. Inactive
+background tabs retain no encoded or decoded page images. Never store image
+data in tab metadata or persist it to disk.
 
 The initial renderer is bounded full-page rendering. Do not add tile/partial
 rendering, multiple live documents, or additional renderer workers without

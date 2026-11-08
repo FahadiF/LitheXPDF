@@ -11,10 +11,12 @@ budgets to test, not evidence that memory use has already improved.
 - One child process owns the one active PDFium document and all PDFium objects.
 - At most one render executes at a time. A render bitmap is dropped after
   encoding and response transmission.
-- The frontend retains the visible image and a bounded encoded-image LRU for
-  the active tab only. Deactivation clears all encoded entries for that tab,
-  clears image element sources/references, and revokes its object URLs before
-  activating another tab. No inactive tab has encoded or decoded page images.
+- The frontend retains one visible decoded image and at most two encoded page
+  responses for the active document, with a 16 MiB total encoded-response cap.
+  The cache contains only validated binary render envelopes; it creates no
+  image elements or object URLs. Opening/replacing/closing a document clears
+  all encoded entries, clears image sources/references, and revokes its object
+  URL. No inactive document has encoded or decoded page images.
 - Document close is required for releasing document-owned native objects.
   It is not evidence that the Windows working set immediately falls; report
   process private bytes and working set separately.
@@ -36,7 +38,7 @@ must be tuned using the benchmark corpus:
 | Maximum width or height | 8,192 px | Reject request or downscale while preserving aspect ratio |
 | Maximum RGBA bitmap bytes | 32 MiB | Enforce before allocating/rendering where possible |
 | Maximum encoded image payload | 32 MiB | Abort bounded writer; return `IMAGE_TOO_LARGE`, never send partial bytes |
-| Frontend encoded image cache | 64 MiB | Active-tab-only LRU; clear completely on deactivation |
+| Frontend encoded page-response cache | 16 MiB and at most 2 pages | Cache only validated next-page responses; do not cache an individual response above 16 MiB; evict oldest entries to satisfy both caps; clear on document change/close |
 | Decoded WebView images | 1 page, at most 32 MiB RGBA dimensions | Clear `src`, remove element/references, revoke URL on replacement/deactivation |
 | IPC control/request payload | 64 KiB per frame | Reject before allocation |
 | IPC image-result payload | 32 MiB image bytes + at most 4 KiB metadata | Reject malformed/oversized frame and restart worker |
@@ -91,7 +93,7 @@ measurements exist and are reported with their limits.
 
 ## Current single-document UI accounting
 
-The current Milestone 1 view creates one lightweight DOM slot per page in the active document and reuses one decoded <img> element for the page nearest the viewport. It does not eagerly render all pages and does not currently maintain an encoded-image LRU. Scroll/page changes clear the prior src and revoke its object URL before assigning the next response. The page-slot DOM grows with page count and is not yet virtualized. The raw IPC response and the frontend's copied PNG bytes/Blob can overlap temporarily during image handoff; this transient peak has not been measured. These implementation details are not evidence of a memory improvement or a total-process memory bound.
+The current single-document view creates one lightweight DOM slot per page in the active document and reuses one decoded <img> element for the page nearest the viewport. It does not eagerly render all pages. After one second without page changes it may prefetch the immediately following page into a cache of at most two encoded responses and 16 MiB total. It does not retain decoded images or object URLs for prefetched pages. On a page change, the prior image remains assigned until the replacement response is validated; the prior src is then cleared and its URL revoked. Opening/replacing/closing a document clears all prefetched bytes and revokes the active image URL. The page-slot DOM grows with page count and is not yet virtualized. The raw IPC response and the frontend's copied PNG bytes/Blob can overlap temporarily during image handoff; this transient peak has not been measured. These implementation details are not evidence of a memory improvement or a total-process memory bound.
 
 The five-slot DOM experiment was reverted after it truncated navigation and
 did not provide a bounded object-URL lifecycle. The current one-image design
@@ -106,3 +108,21 @@ frontend result list, but does not hard-bound PDFium's internal text extraction
 or allocations for a page. Search timeout terminates and reaps the worker if
 the operation exceeds its deadline. Bookmarks and theme preference are small
 localStorage metadata; they never retain rendered images or PDF contents.
+
+
+## Bounded next-page prefetch — 2026-11-08
+
+After a page response is installed, the frontend waits 1,000 ms without a
+page change before requesting the immediately following page. It never scans
+ahead beyond one page. A prefetched frame is validated before being cached.
+The cache is limited to two encoded responses and 16 MiB total; any response
+larger than 16 MiB is displayed when requested but is not cached. A queued
+prefetch is cancelled when the user navigates elsewhere or closes/replaces
+the document. If the user selects the page currently being prefetched, that
+request is promoted and reused. At most one decoded <img> and its object URL
+are retained, and the centered loading indicator is reserved for the initial
+open; page transitions keep it hidden and replace the image only after the
+new validated response arrives.
+
+The prefetch delay and cache limits are initial test targets, not measured
+performance or memory improvements. Full-document eager rendering is not used.

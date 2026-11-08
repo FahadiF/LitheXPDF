@@ -152,3 +152,35 @@ worker on timeout; it does not cancel PDFium in place. The PDFium runtime/API
 compatibility caveat, packaged execution, clean-machine dependencies, memory
 measurements, and performance benchmarks remain open. No memory or speed
 improvement is claimed.
+
+
+### Page-transition loader and bounded prefetch — 2026-11-08
+
+The centered loading indicator now remains for the initial page open only.
+During page changes the current image remains assigned until a validated
+replacement arrives, and the status line is not changed to “Rendering page”.
+The frontend waits one second after an installed page before prefetching only
+the next page. The encoded response cache is limited to two entries and 16
+MiB total; larger responses are not cached. Document open/replacement/close
+clears the cache and URL references.
+
+Automated verification in the repository root:
+
+| Command | Result |
+| --- | --- |
+| pnpm typecheck | Passed, exit 0 |
+| pnpm test | Passed, 20 tests, exit 0 |
+| pnpm build | Passed, exit 0 |
+| git diff --check | Passed, exit 0 |
+
+The added frontend tests cover the hidden navigation loader and retained page
+image, one-second delayed next-page prefetch and response reuse, delayed
+prefetch cleanup on document close, and stale in-flight prefetch rejection
+after navigating away. These tests do not measure process memory or prove a
+performance improvement.
+
+Manual desktop WebView2 confirmation is still required. In particular, open a
+multi-page PDF, scroll quickly and slowly, confirm no centered loader appears
+between pages, verify the first-page loader disappears after open, and compare
+page transitions with prefetch enabled. The automated checks do not establish
+the visual experience in the running Tauri window.

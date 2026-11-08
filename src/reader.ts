@@ -10,6 +10,18 @@ const MAX_SEARCH_RESULTS = 250;
 const MAX_SEARCH_EXCERPT_BYTES = 128;
 const VERSION = 1;
 const PAGE_KIND = 0x8003;
+const PREFETCH_DELAY_MS = 1_000;
+const PREFETCH_CACHE_MAX_PAGES = 2;
+const PREFETCH_CACHE_MAX_BYTES = 16 * 1024 * 1024;
+
+interface PrefetchTask {
+  pageIndex: number;
+  requestToken: string;
+  generationToken: number;
+  cancelled: boolean;
+  promoted: boolean;
+  promise: Promise<ArrayBuffer | undefined>;
+}
 
 export interface OpenPdfResult {
   document_id: string;
@@ -112,6 +124,10 @@ export class PdfReaderUi {
   private renderToken = 0;
   private activeRequestToken?: string;
   private scrollTimer?: ReturnType<typeof setTimeout>;
+  private prefetchTimer?: ReturnType<typeof setTimeout>;
+  private prefetchTask?: PrefetchTask;
+  private readonly prefetchedPages = new Map<number, ArrayBuffer>();
+  private prefetchedBytes = 0;
   private searchTimer?: ReturnType<typeof setTimeout>;
   private searchSequence = 0;
   private searchRunning = false;
@@ -185,6 +201,7 @@ export class PdfReaderUi {
     const token = ++this.generationToken;
     this.renderToken++;
     this.cancelCurrentRender();
+    this.clearPrefetchState();
     this.clearImage();
     this.current = undefined;
     this.currentPath = undefined;
@@ -230,7 +247,7 @@ export class PdfReaderUi {
       this.pageTotal.textContent = `/ ${result.page_count}`;
       this.pageSize.textContent = `${result.page_width_points.toFixed(0)} × ${result.page_height_points.toFixed(0)} pt`;
       this.updateControls();
-      await this.showPage(0);
+      await this.showPage(0, true);
     } catch (error) {
       if (token === this.generationToken) {
         this.loading.hidden = true;
@@ -483,35 +500,77 @@ export class PdfReaderUi {
     this.searchPanel.hidden = true;
   }
 
-  private async showPage(index: number): Promise<void> {
+  private async showPage(index: number, opening = false): Promise<void> {
     const doc = this.current;
     if (!doc || index < 0 || index >= doc.page_count) return;
     const generationToken = this.generationToken;
     const renderToken = ++this.renderToken;
     this.cancelCurrentRender();
-    const requestToken = crypto.randomUUID();
-    this.activeRequestToken = requestToken;
-    this.clearImage();
+    if (this.prefetchTimer !== undefined) clearTimeout(this.prefetchTimer);
+    this.prefetchTimer = undefined;
+    if (this.prefetchTask && this.prefetchTask.pageIndex !== index) this.cancelPrefetch();
     this.clearError();
-    this.loading.hidden = false;
-    this.status.textContent = "Rendering page";
+    if (opening) {
+      this.loading.hidden = false;
+      this.status.textContent = "Rendering page";
+    } else if (this.objectUrl) {
+      this.loading.hidden = true;
+    }
     this.pageIndex = index;
     this.pageNumber.value = String(index + 1);
     this.pageNumber.setAttribute("aria-invalid", "false");
-    this.pageTotal.textContent = `/ ${doc.page_count}`;
+    this.pageTotal.textContent = "/ " + doc.page_count;
     this.updateControls();
+    const isCurrentRequest = () => generationToken === this.generationToken
+      && renderToken === this.renderToken
+      && this.current?.document_id === doc.document_id
+      && this.current.generation === doc.generation
+      && this.pageIndex === index;
+
     try {
-      const dpr = Math.min(globalThis.devicePixelRatio || 1, 2);
-      const cssWidth = Math.max(1, this.pageStack.clientWidth || this.viewer.clientWidth - 56 || 1000);
-      const [width, height] = targetDimensions(cssWidth * dpr, doc.page_width_points, doc.page_height_points);
-      const buffer = await this.bridge.invoke<ArrayBuffer>("render_page", { requestToken, documentId: doc.document_id, generation: doc.generation, pageIndex: index, width, height, zoom: 1 });
-      const parsed = parseRenderResponse(buffer, { documentId: doc.document_id, generation: doc.generation, pageIndex: index, tabId: uuidBytes(doc.document_id) });
-      if (this.activeRequestToken === requestToken) this.activeRequestToken = undefined;
-      if (generationToken !== this.generationToken || renderToken !== this.renderToken || this.current?.document_id !== doc.document_id || this.current.generation !== doc.generation || this.pageIndex !== index) return;
+      let buffer = this.takePrefetchedPage(index);
+      if (!buffer) {
+        const task = this.prefetchTask;
+        if (task?.pageIndex === index && !task.cancelled) {
+          task.promoted = true;
+          buffer = await task.promise;
+        } else {
+          this.cancelPrefetch();
+        }
+      }
+      if (!isCurrentRequest()) return;
+      if (!buffer) {
+        const requestToken = crypto.randomUUID();
+        this.activeRequestToken = requestToken;
+        const dpr = Math.min(globalThis.devicePixelRatio || 1, 2);
+        const cssWidth = Math.max(1, this.pageStack.clientWidth || this.viewer.clientWidth - 56 || 1000);
+        const [width, height] = targetDimensions(cssWidth * dpr, doc.page_width_points, doc.page_height_points);
+        try {
+          buffer = await this.bridge.invoke<ArrayBuffer>("render_page", {
+            requestToken, documentId: doc.document_id, generation: doc.generation,
+            pageIndex: index, width, height, zoom: 1,
+          });
+        } finally {
+          if (this.activeRequestToken === requestToken) this.activeRequestToken = undefined;
+        }
+        if (!isCurrentRequest()) return;
+      }
+      if (!buffer) throw new Error("The requested page could not be rendered.");
+      const parsed = parseRenderResponse(buffer, {
+        documentId: doc.document_id, generation: doc.generation, pageIndex: index,
+        tabId: uuidBytes(doc.document_id),
+      });
+      if (generationToken !== this.generationToken || renderToken !== this.renderToken
+        || this.current?.document_id !== doc.document_id || this.current.generation !== doc.generation
+        || this.pageIndex !== index) return;
+
       const imageBuffer = parsed.png.slice().buffer as ArrayBuffer;
       const slot = this.pageSlots[index];
-      slot.style.aspectRatio = `${parsed.width} / ${parsed.height}`;
-      this.objectUrl = (this.bridge.createObjectURL ?? URL.createObjectURL.bind(URL))(new Blob([imageBuffer], { type: "image/png" }));
+      slot.style.aspectRatio = parsed.width + " / " + parsed.height;
+      this.clearImage();
+      this.objectUrl = (this.bridge.createObjectURL ?? URL.createObjectURL.bind(URL))(
+        new Blob([imageBuffer], { type: "image/png" }),
+      );
       this.image.onload = () => {
         if (generationToken === this.generationToken && renderToken === this.renderToken) {
           this.image.hidden = false;
@@ -519,14 +578,103 @@ export class PdfReaderUi {
           this.status.textContent = "Ready";
         }
       };
-      this.image.onerror = () => { if (generationToken === this.generationToken && renderToken === this.renderToken) { this.clearImage(); this.loading.hidden = true; this.showError("The rendered page could not be decoded by WebView2."); } };
+      this.image.onerror = () => {
+        if (generationToken === this.generationToken && renderToken === this.renderToken) {
+          this.clearImage();
+          this.loading.hidden = true;
+          this.showError("The rendered page could not be decoded by WebView2.");
+        }
+      };
       slot.append(this.image);
       this.image.hidden = true;
       this.image.src = this.objectUrl;
+      this.scheduleNextPagePrefetch(index, doc, generationToken);
     } catch (error) {
-      if (this.activeRequestToken === requestToken) this.activeRequestToken = undefined;
-      if (generationToken === this.generationToken && renderToken === this.renderToken) { this.loading.hidden = true; this.showError(error); }
+      if (generationToken === this.generationToken && renderToken === this.renderToken) {
+        this.loading.hidden = true;
+        this.showError(error);
+      }
     }
+  }
+
+  private scheduleNextPagePrefetch(pageIndex: number, doc: OpenPdfResult, generationToken: number): void {
+    this.cancelPrefetch();
+    if (pageIndex + 1 >= doc.page_count) return;
+    this.prefetchTimer = setTimeout(() => {
+      this.prefetchTimer = undefined;
+      if (generationToken !== this.generationToken || this.current?.document_id !== doc.document_id
+        || this.current.generation !== doc.generation || this.pageIndex !== pageIndex) return;
+      const task: PrefetchTask = {
+        pageIndex: pageIndex + 1, requestToken: crypto.randomUUID(), generationToken,
+        cancelled: false, promoted: false, promise: Promise.resolve(undefined),
+      };
+      this.prefetchTask = task;
+      task.promise = this.runPrefetch(task, doc);
+    }, PREFETCH_DELAY_MS);
+  }
+
+  private async runPrefetch(task: PrefetchTask, doc: OpenPdfResult): Promise<ArrayBuffer | undefined> {
+    try {
+      const dpr = Math.min(globalThis.devicePixelRatio || 1, 2);
+      const cssWidth = Math.max(1, this.pageStack.clientWidth || this.viewer.clientWidth - 56 || 1000);
+      const [width, height] = targetDimensions(cssWidth * dpr, doc.page_width_points, doc.page_height_points);
+      const buffer = await this.bridge.invoke<ArrayBuffer>("render_page", {
+        requestToken: task.requestToken, documentId: doc.document_id, generation: doc.generation,
+        pageIndex: task.pageIndex, width, height, zoom: 1,
+      });
+      if (task.cancelled || task.generationToken !== this.generationToken
+        || this.current?.document_id !== doc.document_id || this.current.generation !== doc.generation) return undefined;
+      parseRenderResponse(buffer, {
+        documentId: doc.document_id, generation: doc.generation, pageIndex: task.pageIndex,
+        tabId: uuidBytes(doc.document_id),
+      });
+      if (task.promoted) return buffer;
+      if (buffer.byteLength <= PREFETCH_CACHE_MAX_BYTES) this.cachePrefetchedPage(task.pageIndex, buffer);
+      return undefined;
+    } catch {
+      return undefined;
+    } finally {
+      if (this.prefetchTask === task) this.prefetchTask = undefined;
+    }
+  }
+
+  private cachePrefetchedPage(pageIndex: number, buffer: ArrayBuffer): void {
+    const previous = this.prefetchedPages.get(pageIndex);
+    if (previous) this.prefetchedBytes -= previous.byteLength;
+    this.prefetchedPages.delete(pageIndex);
+    this.prefetchedPages.set(pageIndex, buffer);
+    this.prefetchedBytes += buffer.byteLength;
+    while (this.prefetchedPages.size > PREFETCH_CACHE_MAX_PAGES || this.prefetchedBytes > PREFETCH_CACHE_MAX_BYTES) {
+      const oldest = this.prefetchedPages.keys().next().value as number | undefined;
+      if (oldest === undefined) break;
+      const evicted = this.prefetchedPages.get(oldest);
+      this.prefetchedPages.delete(oldest);
+      if (evicted) this.prefetchedBytes -= evicted.byteLength;
+    }
+  }
+
+  private takePrefetchedPage(pageIndex: number): ArrayBuffer | undefined {
+    const buffer = this.prefetchedPages.get(pageIndex);
+    if (!buffer) return undefined;
+    this.prefetchedPages.delete(pageIndex);
+    this.prefetchedBytes -= buffer.byteLength;
+    return buffer;
+  }
+
+  private cancelPrefetch(): void {
+    const task = this.prefetchTask;
+    this.prefetchTask = undefined;
+    if (this.prefetchTimer !== undefined) clearTimeout(this.prefetchTimer);
+    this.prefetchTimer = undefined;
+    if (!task) return;
+    task.cancelled = true;
+    void this.bridge.invoke("cancel_render", { requestToken: task.requestToken }).catch(() => undefined);
+  }
+
+  private clearPrefetchState(): void {
+    this.cancelPrefetch();
+    this.prefetchedPages.clear();
+    this.prefetchedBytes = 0;
   }
 
   async close(): Promise<void> {
@@ -534,6 +682,7 @@ export class PdfReaderUi {
     ++this.generationToken;
     ++this.renderToken;
     this.cancelCurrentRender();
+    this.clearPrefetchState();
     this.current = undefined;
     this.currentPath = undefined;
     this.bookmarks = [];

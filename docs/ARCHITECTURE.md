@@ -294,9 +294,17 @@ for the page nearest the viewport after a short scroll debounce; it does not
 eagerly render every page. One shared image element is moved to the selected
 slot, and page navigation scrolls that slot into view. The host supplies a
 maximum render box; the worker fits the actual page dimensions within that box
-while preserving aspect ratio and the existing pixel/dimension caps. This
-remains full-page rendering with one active image; tiles, parallel renderers,
-and multiple live documents are not part of this change. A five-slot DOM
+while preserving aspect ratio and the existing pixel/dimension caps. After a
+page response is installed, the frontend waits one second of idle time before
+requesting only the immediately following page. It retains at most two
+validated encoded responses, capped at 16 MiB total; an individual response
+larger than that is not cached. It keeps one decoded image/object URL, clears
+prefetch state on document replacement or close, and cancels queued prefetch
+work when navigation changes. Page transitions do not display the centered
+initial-open loader and keep the prior image until the replacement response is
+validated. This remains full-page rendering with one active image; eager
+whole-document rendering, tiles, parallel renderers, and multiple live
+documents are not part of this change. A five-slot DOM
 experiment was reverted because it cut off full-document navigation. Runtime
 UI verification and memory measurement remain pending.
 
