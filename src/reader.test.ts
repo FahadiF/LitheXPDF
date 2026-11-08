@@ -8,7 +8,7 @@ const stylesheet = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8"
 const id = "00112233445566778899aabbccddeeff";
 const tab = Uint8Array.from(id.match(/../g)!.map((x) => Number.parseInt(x, 16)));
 
-function pageFrame(pageIndex = 0, generation = 7, image = [0x89, 0x50, 0x4e, 0x47], documentId = id): ArrayBuffer {
+function pageFrame(pageIndex = 0, generation = 7, image = [0x89, 0x50, 0x4e, 0x47], documentId = id, width = 640, height = 480): ArrayBuffer {
   const payloadLength = 42 + image.length;
   const buffer = new ArrayBuffer(20 + payloadLength);
   const bytes = new Uint8Array(buffer);
@@ -16,7 +16,7 @@ function pageFrame(pageIndex = 0, generation = 7, image = [0x89, 0x50, 0x4e, 0x4
   const view = new DataView(buffer);
   view.setUint16(4, 1, false); view.setUint16(6, 0x8003, false); view.setBigUint64(8, 19n, false); view.setUint32(16, payloadLength, false);
   bytes.set(documentId === id ? tab : Uint8Array.from(documentId.match(/../g)!.map((x) => Number.parseInt(x, 16))), 20); view.setBigUint64(36, BigInt(generation), false); view.setUint32(44, pageIndex, false);
-  view.setUint32(48, 640, false); view.setUint32(52, 480, false); view.setUint16(56, 1, false); view.setUint32(58, image.length, false);
+  view.setUint32(48, width, false); view.setUint32(52, height, false); view.setUint16(56, 1, false); view.setUint32(58, image.length, false);
   bytes.set(image, 62);
   return buffer;
 }
@@ -47,7 +47,9 @@ describe("reader image lifecycle", () => {
     document.body.innerHTML = `<main><button id="open-button"></button><button id="close-button"></button><button id="previous-button"></button><button id="next-button"></button><span id="page-counter"></span><span id="document-name"></span><span id="status-text"></span><span id="page-size"></span><section id="viewer"><div id="loading-state" class="loading-state" hidden></div><div id="page-stack" class="page-stack" hidden><img id="page-image" hidden></div><div id="empty-state" class="empty-state"></div><div id="error-state" class="error-state" hidden></div></section></main>`;
   });
 
-  it("hides loading and image elements marked hidden", () => {
+  it("starts with the loading indicator and page image hidden", () => {
+    expect(document.querySelector<HTMLElement>("#loading-state")?.hidden).toBe(true);
+    expect(document.querySelector<HTMLImageElement>("#page-image")?.hidden).toBe(true);
   });
 
   it("revokes the prior page URL and rejects an image response that arrives after close", async () => {
@@ -83,6 +85,7 @@ describe("reader image lifecycle", () => {
     await Promise.resolve(); await Promise.resolve();
     expect(urls).toBe(1);
     expect(image.hasAttribute("src")).toBe(false);
+    expect(document.querySelectorAll(".page-slot")).toHaveLength(0);
   });
 
   it("shows an error and leaves no stale image when render fails", async () => {
@@ -134,5 +137,60 @@ describe("reader image lifecycle", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("navigates past five pages while retaining one shared image and revoking replaced URLs", async () => {
+    const revoked: string[] = [];
+    let urls = 0;
+    const bridge: ReaderBridge = {
+      pickPdf: async () => null,
+      invoke: vi.fn(async (command: string, args?: Record<string, unknown>) => {
+        if (command === "open_pdf") return { document_id: id, generation: 7, page_count: 7, page_width_points: 612, page_height_points: 792 } as never;
+        if (command === "render_page") return pageFrame(Number(args?.pageIndex ?? 0)) as never;
+        return undefined as never;
+      }),
+      createObjectURL: () => `blob:long-${++urls}`,
+      revokeObjectURL: (url) => revoked.push(url),
+    };
+    const ui = new PdfReaderUi(document, bridge);
+    await ui.open("C:\\long.pdf");
+    const image = document.querySelector<HTMLImageElement>("#page-image")!;
+    const next = document.querySelector<HTMLButtonElement>("#next-button")!;
+
+    expect(document.querySelectorAll(".page-slot")).toHaveLength(7);
+    expect(image.closest<HTMLElement>(".page-slot")?.dataset.pageIndex).toBe("0");
+    for (let pageIndex = 1; pageIndex < 7; pageIndex++) {
+      next.click();
+      expect(document.querySelector("#page-counter")?.textContent).toBe(`${pageIndex + 1} / 7`);
+      await Promise.resolve();
+      expect(document.querySelectorAll("img")).toHaveLength(1);
+      expect(image.closest<HTMLElement>(".page-slot")?.dataset.pageIndex).toBe(String(pageIndex));
+    }
+    expect(next.disabled).toBe(true);
+    expect(revoked).toHaveLength(6);
+    await ui.close();
+    expect(revoked).toHaveLength(7);
+    expect(image.hasAttribute("src")).toBe(false);
+    expect(document.querySelectorAll(".page-slot")).toHaveLength(0);
+  });
+
+  it("fits mixed page dimensions without stretching the shared image", async () => {
+    const bridge: ReaderBridge = {
+      pickPdf: async () => null,
+      invoke: vi.fn(async (command: string, args?: Record<string, unknown>) => {
+        if (command === "open_pdf") return { document_id: id, generation: 7, page_count: 2, page_width_points: 612, page_height_points: 792 } as never;
+        if (command === "render_page") return pageFrame(Number(args?.pageIndex ?? 0), 7, [0x89, 0x50, 0x4e, 0x47], id, 300, 600) as never;
+        return undefined as never;
+      }),
+      createObjectURL: () => "blob:portrait",
+      revokeObjectURL: vi.fn(),
+    };
+    const ui = new PdfReaderUi(document, bridge);
+    await ui.open("C:\\mixed-size.pdf");
+    const image = document.querySelector<HTMLImageElement>("#page-image")!;
+    const slot = image.closest<HTMLElement>(".page-slot");
+    expect(slot?.style.aspectRatio).toBe("300 / 600");
+    expect(stylesheet).toMatch(/#page-image\s*\{[^}]*width:\s*100%[^}]*height:\s*auto/s);
+    await ui.close();
   });
 });

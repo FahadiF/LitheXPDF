@@ -37,6 +37,21 @@ stale-image cleanup, render errors, and viewport-page selection. Rust tests
 cover the binary protocol, worker supervision, PDFium smoke paths, and worker
 lifecycle. Automated tests do not replace manual WebView2 testing.
 
+### Frontend follow-up — 2026-11-08
+
+The five-slot page-DOM experiment was reverted after it limited navigation to
+the slot window, shortened the document's scroll extent, and failed the
+existing image-lifecycle test. The current reader keeps lightweight slots for
+all pages and moves one shared image between them. This restores full-document
+navigation; it is not DOM virtualization and no memory improvement is claimed.
+
+After removing nonfunctional search, annotation, and theme controls and adding
+long-document navigation, URL-cleanup, and mixed-page-aspect-ratio tests,
+`pnpm typecheck`, `pnpm test` (9 tests), `pnpm build`, and `git diff --check`
+passed. Rust checks were not rerun because no Rust source changed. The desktop
+window, large-document workload, memory, and render performance were not
+measured in this follow-up.
+
 ## Manual desktop validation
 
 An earlier manual run opened a multi-page PDF and displayed a page. The latest
@@ -57,7 +72,9 @@ WebView2 window.
 
 The UI creates one lightweight slot per page and renders only the page nearest
 the viewport. Test very high page counts before deciding whether page-slot
-virtualization is needed.
+virtualization is needed. The reverted five-slot experiment is not a supported
+implementation; any later virtual scroller must preserve full-document scroll
+geometry and pass navigation tests beyond its recycled slot window.
 
 ## Compatibility and release gates
 

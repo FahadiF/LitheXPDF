@@ -90,3 +90,9 @@ measurements exist and are reported with their limits.
 ## Current single-document UI accounting
 
 The current Milestone 1 view creates one lightweight DOM slot per page in the active document and reuses one decoded <img> element for the page nearest the viewport. It does not eagerly render all pages and does not currently maintain an encoded-image LRU. Scroll/page changes clear the prior src and revoke its object URL before assigning the next response. The page-slot DOM grows with page count and is not yet virtualized. The raw IPC response and the frontend's copied PNG bytes/Blob can overlap temporarily during image handoff; this transient peak has not been measured. These implementation details are not evidence of a memory improvement or a total-process memory bound.
+
+The five-slot DOM experiment was reverted after it truncated navigation and
+did not provide a bounded object-URL lifecycle. The current one-image design
+remains the active implementation. Any future virtualization work must retain
+the full scroll extent and prove bounded image cleanup with tests; it must not
+be described as a memory improvement until measured.
