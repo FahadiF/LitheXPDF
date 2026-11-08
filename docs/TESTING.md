@@ -604,3 +604,24 @@ fixture. Close the document and confirm the image clears; check that one
 `pdfium-worker` process exits on close, and that the process also exits when
 the app is shut down. These are pending manual checks, not recorded results.
 
+
+### Scroll view and aspect-ratio correction — 2026-11-08
+
+The user supplied screenshots from a real `pnpm tauri dev` session. They show the native window and a three-page PDF, with a persistent “Rendering page…” pill after the status says “Ready,” a broken image marker in the empty state, and a page stretched to the window shape. The user also reports that the pages did not form a scrollable document. These screenshots are evidence of the pre-change behavior, not a verification of the fixes below.
+
+Source inspection established two defects: the image and loader had author `display` rules that overrode the browser's default hidden handling, and the UI passed viewport width and height as an unconstrained render size. The correction adds an explicit `[hidden]` rule, aspect-preserving worker sizing within the requested box, and a vertical page stack with lightweight slots. Scroll changes are debounced and request only the page nearest the viewport; page navigation scrolls to its page. One image element and object URL are reused and cleared on page changes. The page slots are not virtualized and scale with page count.
+
+Automated results for this correction:
+
+- `pnpm typecheck` — exit 0.
+- `pnpm test` — exit 0; 7 frontend tests pass, including response validation, computed hidden-state behavior, stale image cleanup, error handling, and viewport-page selection. An initial strengthened assertion was placed in a parser-only suite and failed because that suite had no DOM fixture; it was moved to the initialized DOM suite and the final run passed.
+- `pnpm build` — exit 0; Vite production build completed.
+- `cargo test --workspace` — exit 0; 32 Rust tests pass (host 10, protocol 5, worker unit 7, worker smoke 5, worker protocol 5).
+- `cargo check --workspace --all-targets` — the first run concurrent with `cargo test` failed with Windows OS error 32 while Tauri's build script accessed generated files; the isolated serial rerun exited 0.
+- `cargo build --release --target x86_64-pc-windows-msvc -p pdfium-worker` — exit 0.
+- `node scripts/stage-worker-windows.mjs` — exit 0; staged `src-tauri/binaries/pdfium-worker-x86_64-pc-windows-msvc.exe`.
+- `git diff --check` — exit 0 after the final code and documentation edits; Git emitted an LF-to-CRLF working-tree notice for `docs/TESTING.md`.
+
+A fresh `pnpm tauri dev` run started Vite at `http://127.0.0.1:1420/`, logged the Tauri host executable launch, and remains running for manual review. The local page returned HTTP 200 with title `LitheXPDF`; the host process was present. No PDF was opened in this run. This environment did not provide native-window interaction, so the corrected image shape, loader disappearance, scrolling, page navigation, document switching, error view, close, and worker shutdown have not been visually or manually verified. The user's earlier run confirms the app window was visible before this correction.
+
+Next manual check in the running window: open `crates/pdfium-worker/tests/fixtures/smoke-two-page.pdf`; confirm the page has its portrait proportions and the loader disappears after display; scroll down and back up to see both pages and the counter follow the viewport; use Previous/Next; then open an invalid PDF and reopen the fixture. Close it and the app, confirming image cleanup and worker exit. A very high page-count document should also be checked before adding page-slot virtualization. PDFium 157.0.8086.0 with `pdfium-render` 0.9.4 / `pdfium_7881` remains the selected smoke pairing with its documented compatibility limitation. Packaged execution, clean-machine dependencies, memory measurement, and performance benchmarks remain unverified. No memory or performance improvement is claimed.
