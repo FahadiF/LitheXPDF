@@ -27,7 +27,7 @@
       <section id="viewer" class="viewer" aria-label="PDF page">
         <div id="empty-state" class="empty-state"><span class="empty-icon" aria-hidden="true">▤</span><h2>Open a document</h2><p>Select a local PDF to view its pages.</p></div>
         <div id="loading-state" class="loading-state" hidden><span class="spinner" aria-hidden="true"></span><span>Rendering page…</span></div>
-        <img id="page-image" alt="PDF page" hidden />
+        <div id="page-stack" class="page-stack" hidden><img id="page-image" alt="Rendered PDF page" hidden /></div>
         <div id="error-state" class="error-state" role="alert" hidden></div>
       </section>
       <footer class="footer"><span>One active PDFium document</span><span id="page-size"></span></footer>

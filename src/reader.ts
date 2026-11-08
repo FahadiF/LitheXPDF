@@ -67,6 +67,8 @@ export interface ReaderBridge {
 
 export class PdfReaderUi {
   private readonly image: HTMLImageElement;
+  private readonly pageStack: HTMLElement;
+  private readonly viewer: HTMLElement;
   private readonly status: HTMLElement;
   private readonly loading: HTMLElement;
   private readonly error: HTMLElement;
@@ -78,15 +80,19 @@ export class PdfReaderUi {
   private readonly closeButton: HTMLButtonElement;
   private readonly previousButton: HTMLButtonElement;
   private readonly nextButton: HTMLButtonElement;
+  private pageSlots: HTMLElement[] = [];
   private current?: OpenPdfResult;
   private pageIndex = 0;
   private objectUrl?: string;
   private generationToken = 0;
   private renderToken = 0;
   private activeRequestToken?: string;
+  private scrollTimer?: ReturnType<typeof setTimeout>;
 
   constructor(private readonly root: ParentNode, private readonly bridge: ReaderBridge) {
     this.image = this.required("#page-image");
+    this.pageStack = this.required("#page-stack");
+    this.viewer = this.required("#viewer");
     this.status = this.required("#status-text");
     this.loading = this.required("#loading-state");
     this.error = this.required("#error-state");
@@ -102,6 +108,7 @@ export class PdfReaderUi {
     this.closeButton.addEventListener("click", () => void this.close());
     this.previousButton.addEventListener("click", () => void this.showPage(this.pageIndex - 1));
     this.nextButton.addEventListener("click", () => void this.showPage(this.pageIndex + 1));
+    this.viewer.addEventListener("scroll", () => this.scheduleViewportPageRender());
   }
 
   private required<T extends HTMLElement>(selector: string): T {
@@ -125,6 +132,9 @@ export class PdfReaderUi {
     this.clearImage();
     this.current = undefined;
     this.pageIndex = 0;
+    this.pageSlots = [];
+    this.pageStack.replaceChildren();
+    this.pageStack.hidden = true;
     this.updateControls();
     this.name.textContent = "Opening document…";
     this.status.textContent = "Opening PDF";
@@ -138,13 +148,57 @@ export class PdfReaderUi {
       this.current = result;
       this.name.textContent = path.split(/[\\/]/).at(-1) ?? path;
       this.pageIndex = 0;
+      this.createPageSlots(result);
       this.pageCounter.textContent = `1 / ${result.page_count}`;
       this.pageSize.textContent = `${result.page_width_points.toFixed(0)} × ${result.page_height_points.toFixed(0)} pt`;
       this.updateControls();
       await this.showPage(0);
     } catch (error) {
-      if (token === this.generationToken) { this.loading.hidden = true; this.name.textContent = "No document open"; this.empty.hidden = false; this.showError(error); }
+      if (token === this.generationToken) {
+        this.loading.hidden = true;
+        this.pageStack.hidden = true;
+        this.pageStack.replaceChildren();
+        this.pageSlots = [];
+        this.name.textContent = "No document open";
+        this.empty.hidden = false;
+        this.showError(error);
+      }
     }
+  }
+
+  private createPageSlots(doc: OpenPdfResult): void {
+    this.pageSlots = Array.from({ length: doc.page_count }, (_, index) => {
+      const slot = document.createElement("section");
+      slot.className = "page-slot";
+      slot.dataset.pageIndex = String(index);
+      slot.setAttribute("aria-label", `Page ${index + 1}`);
+      slot.style.aspectRatio = `${doc.page_width_points} / ${doc.page_height_points}`;
+      return slot;
+    });
+    this.pageStack.replaceChildren(...this.pageSlots);
+    this.pageStack.hidden = false;
+  }
+
+  private scheduleViewportPageRender(): void {
+    if (!this.current) return;
+    if (this.scrollTimer !== undefined) clearTimeout(this.scrollTimer);
+    this.scrollTimer = setTimeout(() => {
+      this.scrollTimer = undefined;
+      const center = this.viewer.scrollTop + this.viewer.clientHeight / 2;
+      let closest = this.pageIndex;
+      let closestDistance = Number.POSITIVE_INFINITY;
+      for (let index = 0; index < this.pageSlots.length; index++) {
+        const slot = this.pageSlots[index];
+        const top = slot.offsetTop;
+        const bottom = top + slot.offsetHeight;
+        const distance = center < top ? top - center : center > bottom ? center - bottom : 0;
+        if (distance < closestDistance) {
+          closest = index;
+          closestDistance = distance;
+        }
+      }
+      if (closest !== this.pageIndex) void this.showPage(closest);
+    }, 100);
   }
 
   private async showPage(index: number): Promise<void> {
@@ -163,19 +217,28 @@ export class PdfReaderUi {
     this.pageCounter.textContent = `${index + 1} / ${doc.page_count}`;
     this.updateControls();
     try {
-      const viewer = this.root.querySelector<HTMLElement>("#viewer");
-      const width = Math.max(1, Math.min(8192, Math.round((viewer?.clientWidth || 1100) * Math.min(devicePixelRatio || 1, 2))));
-      const height = Math.max(1, Math.min(8192, Math.round((viewer?.clientHeight || 900) * Math.min(devicePixelRatio || 1, 2))));
+      const dpr = Math.min(globalThis.devicePixelRatio || 1, 2);
+      const cssWidth = Math.max(1, this.pageStack.clientWidth || this.viewer.clientWidth - 56 || 1000);
+      const [width, height] = targetDimensions(cssWidth * dpr, doc.page_width_points, doc.page_height_points);
       const buffer = await this.bridge.invoke<ArrayBuffer>("render_page", { requestToken, documentId: doc.document_id, generation: doc.generation, pageIndex: index, width, height, zoom: 1 });
       const parsed = parseRenderResponse(buffer, { documentId: doc.document_id, generation: doc.generation, pageIndex: index, tabId: uuidBytes(doc.document_id) });
       if (this.activeRequestToken === requestToken) this.activeRequestToken = undefined;
       if (generationToken !== this.generationToken || renderToken !== this.renderToken || this.current?.document_id !== doc.document_id || this.current.generation !== doc.generation || this.pageIndex !== index) return;
       const imageBuffer = parsed.png.slice().buffer as ArrayBuffer;
+      const slot = this.pageSlots[index];
+      slot.style.aspectRatio = `${parsed.width} / ${parsed.height}`;
       this.objectUrl = (this.bridge.createObjectURL ?? URL.createObjectURL.bind(URL))(new Blob([imageBuffer], { type: "image/png" }));
-      this.image.src = this.objectUrl;
-      this.image.hidden = false;
-      this.image.onload = () => { if (generationToken === this.generationToken && renderToken === this.renderToken) { this.loading.hidden = true; this.status.textContent = "Ready"; } };
+      this.image.onload = () => {
+        if (generationToken === this.generationToken && renderToken === this.renderToken) {
+          this.image.hidden = false;
+          this.loading.hidden = true;
+          this.status.textContent = "Ready";
+        }
+      };
       this.image.onerror = () => { if (generationToken === this.generationToken && renderToken === this.renderToken) { this.clearImage(); this.loading.hidden = true; this.showError("The rendered page could not be decoded by WebView2."); } };
+      slot.append(this.image);
+      this.image.hidden = true;
+      this.image.src = this.objectUrl;
     } catch (error) {
       if (this.activeRequestToken === requestToken) this.activeRequestToken = undefined;
       if (generationToken === this.generationToken && renderToken === this.renderToken) { this.loading.hidden = true; this.showError(error); }
@@ -189,6 +252,8 @@ export class PdfReaderUi {
     this.cancelCurrentRender();
     this.current = undefined;
     this.pageIndex = 0;
+    if (this.scrollTimer !== undefined) clearTimeout(this.scrollTimer);
+    this.scrollTimer = undefined;
     this.clearImage();
     this.loading.hidden = false;
     this.status.textContent = "Closing document";
@@ -198,7 +263,16 @@ export class PdfReaderUi {
       await this.bridge.invoke("close_pdf", { documentId: current.document_id, generation: current.generation });
       this.status.textContent = "Document closed";
     } catch (error) { this.showError(error); }
-    finally { this.loading.hidden = true; this.name.textContent = "No document open"; this.empty.hidden = false; this.pageCounter.textContent = "— / —"; this.pageSize.textContent = ""; }
+    finally {
+      this.loading.hidden = true;
+      this.pageStack.hidden = true;
+      this.pageStack.replaceChildren();
+      this.pageSlots = [];
+      this.name.textContent = "No document open";
+      this.empty.hidden = false;
+      this.pageCounter.textContent = "— / —";
+      this.pageSize.textContent = "";
+    }
   }
 
   private clearImage(): void {
@@ -235,4 +309,14 @@ function uuidBytes(value: string): Uint8Array {
   const normalized = value.replaceAll("-", "");
   if (!/^[0-9a-f]{32}$/i.test(normalized)) throw new Error("Invalid document identity");
   return Uint8Array.from(normalized.match(/../g)!, (byte) => Number.parseInt(byte, 16));
+}
+
+function targetDimensions(cssWidth: number, pageWidth: number, pageHeight: number): [number, number] {
+  const width = Number.isFinite(cssWidth) && cssWidth > 0 ? cssWidth : 1000;
+  if (!Number.isFinite(pageWidth) || !Number.isFinite(pageHeight) || pageWidth <= 0 || pageHeight <= 0) {
+    throw new Error("The PDF page has invalid dimensions.");
+  }
+  const ratio = pageHeight / pageWidth;
+  const scale = Math.min(1, 8192 / width, 8192 / (width * ratio), Math.sqrt(8_388_608 / (width * width * ratio)));
+  return [Math.max(1, Math.floor(width * scale)), Math.max(1, Math.floor(width * ratio * scale))];
 }
