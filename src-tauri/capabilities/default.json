@@ -3,5 +3,12 @@
   "identifier": "default",
   "description": "Minimal LitheXPDF desktop shell permissions",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:allow-open"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-close",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-start-dragging",
+    "dialog:allow-open"
+  ]
 }

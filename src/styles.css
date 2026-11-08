@@ -662,6 +662,81 @@ kbd { padding: 2px 5px; border: 1px solid #46535a; border-radius: 3px; backgroun
 :root[data-theme="light"] .about-license-line .license-link:hover { border: 0; background: transparent; color: #7d0d2e; }
 :root[data-theme="light"] .about-dialog .dialog-actions { border-color: #dbe2e5; }
 
+/* Tauri custom window chrome: the app's existing header replaces the OS title bar. */
+.window-controls { display: none; }
+:root[data-window-chrome="custom"] .topbar {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  grid-template-areas: "leading toolbar window";
+  gap: 12px;
+  padding-right: 10px;
+}
+:root[data-window-chrome="custom"] .topbar-leading { grid-area: leading; }
+:root[data-window-chrome="custom"] .toolbar {
+  grid-area: toolbar;
+  min-width: 0;
+  justify-content: flex-end;
+}
+:root[data-window-chrome="custom"] .window-controls {
+  grid-area: window;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 34px;
+  padding-left: 8px;
+  border-left: 1px solid #2a3439;
+}
+.window-control {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #c5cdd0;
+  cursor: pointer;
+}
+.window-control:hover { background: #2a3439; color: #f1f4f5; }
+.window-control:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.window-control-close { width: 42px; }
+.window-control-close:hover { background: #c42b1f; color: #fff; }
+.window-icon-restore { display: none; }
+.window-controls[data-maximized="true"] .window-icon-maximize { display: none; }
+.window-controls[data-maximized="true"] .window-icon-restore { display: block; }
+
+:root[data-theme="light"] .window-controls { border-color: #d7e0e3; }
+:root[data-theme="light"] .window-control { color: #35454b; }
+:root[data-theme="light"] .window-control:hover { background: #e8eef0; color: #1f2b30; }
+:root[data-theme="light"] .window-control-close:hover { background: #c42b1f; color: #fff; }
+
+@media (max-width: 1400px) {
+  :root[data-window-chrome="custom"] .app-shell { grid-template-rows: auto 38px 42px minmax(0, 1fr) 30px; }
+  :root[data-window-chrome="custom"] .topbar {
+    grid-template-columns: minmax(0, 1fr) max-content;
+    grid-template-areas: "leading window" "toolbar toolbar";
+    height: auto;
+    min-height: 76px;
+    row-gap: 8px;
+    padding: 10px 14px;
+  }
+  :root[data-window-chrome="custom"] .toolbar {
+    width: 100%;
+    flex: initial;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+}
+
+@media (max-width: 640px) {
+  :root[data-window-chrome="custom"] .topbar { padding: 10px 12px; }
+  :root[data-window-chrome="custom"] .toolbar { justify-content: flex-start; }
+  :root[data-window-chrome="custom"] .window-controls { padding-left: 5px; }
+  .window-control { width: 30px; }
+  .window-control-close { width: 36px; }
+}
+
 @media (max-width: 640px) {
   .topbar { padding-left: 10px; padding-right: 10px; }
   .topbar-leading { gap: 9px; }
