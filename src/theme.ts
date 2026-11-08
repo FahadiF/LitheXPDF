@@ -10,7 +10,6 @@ export function installThemeToggle(root: HTMLElement, storage?: Storage): void {
   let theme: Theme = stored === "light" ? "light" : "dark";
   const apply = (): void => {
     root.dataset.theme = theme;
-    button.textContent = theme === "dark" ? "☀" : "◐";
     button.setAttribute("aria-label", `Switch to ${theme === "dark" ? "light" : "dark"} theme`);
     button.title = `Switch to ${theme === "dark" ? "light" : "dark"} theme`;
     button.setAttribute("aria-pressed", String(theme === "light"));
