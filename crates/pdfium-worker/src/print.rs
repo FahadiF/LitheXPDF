@@ -15,13 +15,12 @@ use windows::Win32::{
     },
     System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED},
     UI::Controls::Dialogs::{
-        PrintDlgExW, PD_CURRENTPAGE, PD_DISABLEPRINTTOFILE, PD_NOSELECTION, PD_PAGENUMS,
+        PrintDlgExW, PD_DISABLEPRINTTOFILE, PD_NOCURRENTPAGE, PD_NOPAGENUMS, PD_NOSELECTION,
         PD_RESULT_CANCEL, PD_RESULT_PRINT, PD_RETURNDC, PD_USEDEVMODECOPIESANDCOLLATE, PRINTDLGEXW,
-        PRINTPAGERANGE, START_PAGE_GENERAL,
+        START_PAGE_GENERAL,
     },
 };
 
-const MAX_PRINT_RANGES: usize = 16;
 const MAX_PRINT_JOB_PAGES: u64 = 10_000;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -95,6 +94,9 @@ pub fn print_document(
     document: &PdfDocument<'_>,
     owner_window: usize,
     current_page: u32,
+    page_selection: u8,
+    range_start: u32,
+    range_end: u32,
 ) -> Result<PrintOutcome, String> {
     let page_count = u32::try_from(document.pages().len())
         .map_err(|_| "PDF page count exceeds the Windows print dialog limit")?;
@@ -106,22 +108,22 @@ pub fn print_document(
     }
 
     let _com = ComApartment::initialize()?;
-    let mut page_ranges = [PRINTPAGERANGE::default(); MAX_PRINT_RANGES];
-    page_ranges[0] = PRINTPAGERANGE {
-        nFromPage: current_page + 1,
-        nToPage: current_page + 1,
-    };
+    let selected_ranges = selected_ranges(
+        page_selection,
+        range_start,
+        range_end,
+        page_count,
+        current_page,
+    )?;
     let mut dialog = PRINTDLGEXW::default();
     dialog.lStructSize = size_of::<PRINTDLGEXW>() as u32;
     dialog.hwndOwner = HWND(owner_window as *mut _);
     dialog.Flags = PD_RETURNDC
-        | PD_CURRENTPAGE
+        | PD_NOPAGENUMS
+        | PD_NOCURRENTPAGE
         | PD_DISABLEPRINTTOFILE
         | PD_NOSELECTION
         | PD_USEDEVMODECOPIESANDCOLLATE;
-    dialog.nPageRanges = 1;
-    dialog.nMaxPageRanges = MAX_PRINT_RANGES as u32;
-    dialog.lpPageRanges = page_ranges.as_mut_ptr();
     dialog.nMinPage = 1;
     dialog.nMaxPage = page_count;
     dialog.nCopies = 1;
@@ -146,7 +148,6 @@ pub fn print_document(
         return Err("The Windows print dialog did not provide a printer device context".into());
     }
 
-    let selected_ranges = selected_ranges(&dialog, &page_ranges, page_count, current_page)?;
     let selected_page_count = selected_ranges
         .iter()
         .try_fold(0u64, |total, (from, to)| {
@@ -205,30 +206,28 @@ pub fn print_document(
 }
 
 fn selected_ranges(
-    dialog: &PRINTDLGEXW,
-    ranges: &[PRINTPAGERANGE; MAX_PRINT_RANGES],
+    page_selection: u8,
+    range_start: u32,
+    range_end: u32,
     page_count: u32,
     current_page: u32,
 ) -> Result<Vec<(u32, u32)>, String> {
-    if dialog.Flags.contains(PD_CURRENTPAGE) {
-        return Ok(vec![(current_page + 1, current_page + 1)]);
-    }
-    if !dialog.Flags.contains(PD_PAGENUMS) {
-        return Ok(vec![(1, page_count)]);
-    }
-    let count = usize::try_from(dialog.nPageRanges)
-        .map_err(|_| "Windows returned an invalid number of print ranges")?;
-    if count == 0 || count > ranges.len() {
-        return Err("Windows returned an invalid page range selection".into());
-    }
-    let mut selected = Vec::with_capacity(count);
-    for range in &ranges[..count] {
-        if range.nFromPage == 0 || range.nFromPage > range.nToPage || range.nToPage > page_count {
-            return Err("Windows returned a page range outside the PDF".into());
+    let range = match page_selection {
+        0 if range_start == 0 && range_end == 0 => (current_page + 1, current_page + 1),
+        1 if range_start == 0 && range_end == 0 => (1, page_count),
+        2 if range_start > 0 && range_start <= range_end && range_end <= page_count => {
+            (range_start, range_end)
         }
-        selected.push((range.nFromPage, range.nToPage));
+        0..=2 => return Err("Invalid page selection passed to the printer".into()),
+        _ => return Err("Unknown page selection passed to the printer".into()),
+    };
+    let selected_page_count = u64::from(range.1 - range.0) + 1;
+    if selected_page_count > MAX_PRINT_JOB_PAGES {
+        return Err(format!(
+            "Printing is limited to {MAX_PRINT_JOB_PAGES} pages per job. Choose a smaller page range."
+        ));
     }
-    Ok(selected)
+    Ok(vec![range])
 }
 
 fn render_page_to_printer(

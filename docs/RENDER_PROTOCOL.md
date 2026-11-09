@@ -43,7 +43,7 @@ by its payload:
 | Offset | Size | Field | Encoding |
 | ---: | ---: | --- | --- |
 | 0 | 4 | Magic `PDFW` | ASCII bytes |
-| 4 | 2 | Protocol version (`1`) | unsigned big-endian |
+| 4 | 2 | Protocol version (`2`) | unsigned big-endian |
 | 6 | 2 | Message kind | unsigned big-endian enum |
 | 8 | 8 | Request ID | unsigned big-endian |
 | 16 | 4 | Payload length | unsigned big-endian byte count |
@@ -81,23 +81,34 @@ order and worker search runs serially on the PDFium owner thread. Both message
 kinds use the original nonzero request ID for correlation; failures use the
 normal bounded `ERROR` shape.
 
-`PRINT` is Windows-only and has an exact 36-byte payload: tab ID (16 bytes),
-generation (u64), current zero-based page index (u32), and owner window handle
-(u64). The host obtains the handle from the Tauri window API; the frontend
-cannot supply it. `PRINT_RESULT` has an exact 29-byte payload: tab ID (16),
-generation (u64), status (u8; `0` cancelled, `1` submitted), and pages sent to
-the printer (u32). Cancellation requires a zero page count; a submitted job
-must report at least one page. Both messages use normal nonzero request-ID
-correlation. A failure uses `ERROR` and does not fabricate a print result.
+`PRINT` is Windows-only and has an exact 45-byte payload: tab ID (16 bytes),
+generation (u64), current zero-based page index (u32), owner window handle
+(u64), selection mode (u8), and one-based range start and end (u32 each).
+Selection mode `0` means current page and requires zero range fields; `1`
+means all pages and requires zero range fields; `2` means one inclusive page
+range and requires `1 <= start <= end <= page_count`. The host obtains the
+window handle from the Tauri window API; the frontend cannot supply it. The
+host and worker both validate the selected range and the 10,000-page per-job
+limit before invoking the printer. `PRINT_RESULT` has an exact 29-byte
+payload: tab ID (16), generation (u64), status (u8; `0` cancelled, `1`
+submitted), and pages sent to the printer (u32). Cancellation requires a zero
+page count; a submitted job must report at least one page. Both messages use
+normal nonzero request-ID correlation. A failure uses `ERROR` and does not
+fabricate a print result.
 
-The worker uses the Windows native print property sheet, initially selecting
-the current page and allowing current-page, all-page, or page-range selection
-(up to 16 disjoint ranges), printer selection, and printer-driver settings.
-Paper size, orientation, and other settings depend on the installed printer
-driver. The worker caps a job at 10,000 pages. It renders selected pages
-serially on the PDFium owner thread and sends each bounded bitmap directly to
-the selected GDI printer device context. No print image is returned to the
-host or frontend.
+LitheXPDF presents a branded page-selection dialog first. It shows the current
+page and total document page count, and the range controls display and enforce
+the document's maximum page number (for example, pages `1–115` of `115`). It
+offers current page, all pages, or one inclusive range. A job is limited to
+10,000 pages; for larger documents, the all-pages option is disabled and the
+user can select a smaller range. After confirmation, the Windows native print
+property sheet selects an installed printer and opens its driver-supported
+settings. Its page-selection controls are disabled so it cannot override the
+range already chosen in LitheXPDF. Paper size, orientation, and other settings
+depend on the installed printer driver. The worker renders selected pages
+serially on the PDFium owner thread, one bounded bitmap at a time, and sends
+each directly to the selected GDI printer device context. No print image is
+returned to the host or frontend.
 
 Render/open/control requests and non-image responses have a maximum 64 KiB
 payload. A `PAGE` response contains 42 bytes of fixed metadata (tab ID as 16

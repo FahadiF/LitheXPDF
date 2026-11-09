@@ -4,6 +4,62 @@ LitheXPDF is an early-stage Windows application. This page records reproducible
 checks and remaining validation work. A passing build does not establish full
 PDF compatibility, packaged readiness, or lower memory use.
 
+## Current verification snapshot — 2026-11-09
+
+The public `v0.1.0` x64 preview exists; this snapshot concerns the current
+working tree, not a claim that the published MSI contains these local changes.
+The user reports a prior successful 115-page manual read, but the latest
+image-cache and print changes still need packaged desktop review. The selected
+next target is 1.0.0 with separate x64 and x86 MSIs.
+
+Checks in this environment after updating the test DOM fixture for the print
+dialog and correcting protocol tests that still expected version 1:
+
+| Check | Result |
+| --- | --- |
+| `pnpm install --frozen-lockfile` | Passed, exit 0 outside the restricted sandbox with installed pnpm 12.14.0; the lockfile was unchanged. The project requests pnpm 11.25.0, which could not be downloaded here. |
+| `pnpm typecheck` | Passed, exit 0 using installed pnpm with process-local `npm_config_manage_package_manager_versions=false`; the pinned pnpm version could not be downloaded in this network-restricted environment. |
+| `pnpm test` | Passed, 23 tests, exit 0 using the same pnpm workaround. |
+| `pnpm build` | Passed, exit 0 when run outside the restricted sandbox. A default sandboxed run cannot clear `dist` and exits 1 with `EPERM`. |
+| `cargo check --workspace --all-targets --target x86_64-pc-windows-msvc` | Passed, exit 0 with `CARGO_TARGET_DIR` in `%TEMP%` and execution outside the restricted filesystem sandbox. The first sandboxed attempt failed because `tauri::generate_context!()` could not access the working directory (exit 101). |
+| `cargo test --workspace --target x86_64-pc-windows-msvc` | Passed, exit 0: 35 tests across host, protocol, worker, PDFium smoke, annotation compatibility, and real worker protocol integration targets; zero doc tests. The first run exposed two stale protocol-version assertions; these were fixed and all tests then passed. |
+| `cargo audit` | Unavailable: the cargo-audit subcommand is not installed. |
+| `pnpm audit` | Not completed: package-registry access did not return in the allotted run; the network is unavailable in this environment. |
+| Git state | Read-only inspection outside the restricted sandbox reports branch `main`, revision `affb48b`, tracking `origin/main`, with numerous modified files and existing untracked files. Preserve the dirty checkout; no files were staged or committed. `git diff --check` passes. |
+
+The current suite has 23 frontend tests and 35 Windows-target Rust tests. Those
+automated checks include worker/PDFium smoke tests and a one-page annotation
+API probe, but do not exercise the current UI in a desktop window or install an
+MSI. The x86 Rust target and matching x86 PDFium DLL are not staged.
+Code-signing credentials are not available in this environment.
+
+The public Actions page currently shows a successful CodeQL setup and four
+failed Dependabot Cargo update runs for `glib`; these local workflow and policy
+updates have not been pushed. The remote `SECURITY.md` still says there are no
+supported release builds without acknowledging the published preview. The
+local revision clarifies that `v0.1.0` is an evaluation preview, not a
+supported stable release. The `glib` 0.18.5 alert is reached through GTK/WebKit Linux dependency
+packages in the lockfile; the Windows target does not build those packages,
+but the alert remains unresolved for the full dependency graph. Do not dismiss
+it or claim the full dependency graph is clean. Install/use `cargo-audit` and
+inspect Dependabot logs from an online environment before setting the 1.0
+security gate.
+
+The repository now contains `.github/workflows/windows-ci.yml`. It is a
+Windows x64 validation and unsigned MSI-candidate workflow for pull requests,
+pushes to `main`, and manual runs. It does not sign or publish. Its first
+GitHub-hosted run is still pending; x86 is intentionally absent until a
+matching DLL and validation environment are verified. The x86 artifact
+identified in `docs/ROADMAP_1.0.md` remains a research candidate, not a selected
+runtime. A new native compatibility probe creates, saves, and reloads a
+highlight, free-text note, and ink annotation with the selected DLL; it is not
+yet wired to the host-worker protocol or reader UI. Multi-page and rotated
+geometry, output-copy workflow, and compatibility outside this one fixture are
+still unverified.
+
+Treat the dated entries below as evidence of what was tested at each point,
+not as a statement of current status.
+
 ## Automated checks
 
 Run from the repository root:
@@ -346,6 +402,11 @@ desktop and installation checks are completed.
 
 ### Native multi-page Windows printing — 2026-11-09
 
+This section records the initial native-print implementation. Its page
+selection inside the Windows dialog is superseded by the LitheXPDF page
+selector documented below; the native dialog now only selects the printer and
+driver settings.
+
 The earlier notes above describing current-page-only WebView printing are
 historical and are superseded by this implementation. The toolbar, menu, and
 Ctrl+P now invoke an asynchronous Tauri command. On Windows, the host sends a
@@ -387,3 +448,70 @@ the resulting page count. Also confirm the app remains responsive before the
 native modal dialog opens and reports useful errors for missing printers or
 failed print jobs. No print reliability, performance, or memory improvement
 is claimed until those checks and measurements exist.
+
+### Branded print selection and MSI artwork — 2026-11-09
+
+The toolbar, menu, and Ctrl+P now open a LitheXPDF-styled page-selection
+dialog before the Windows printer property sheet. It displays the current
+page and total count, including the maximum range endpoint (for example,
+`1–115` of `115`), validates inclusive one-based ranges, and prevents jobs
+larger than the worker's 10,000-page limit. For a document over that limit,
+the all-pages choice is disabled and smaller ranges remain available. The
+Windows dialog remains responsible for printer selection and driver-specific
+paper/orientation settings; its own page controls are disabled. The worker
+still renders and prints pages sequentially, one bounded bitmap at a time.
+
+Because the `PRINT` request payload changed from 36 to 45 bytes, the shared
+PDFW protocol version is now 2. The host, worker, and WebView render-response
+validator must be shipped from the same build. See ADR 0004.
+
+The WiX output uses `icons/icon.ico` as the Windows Installer product icon
+(`ProductIcon` / `ARPPRODUCTICON`). A later attempt to add custom WiX banner
+and welcome/finish bitmaps was removed after manual review found text overlap
+and poor contrast; the installer now uses the standard WiX page layout.
+
+Checks actually run:
+
+| Command | Result |
+| --- | --- |
+| `pnpm typecheck` | Passed, exit 0 using the installed pnpm 12.14.0 with process-local `npm_config_manage_package_manager_versions=false`; the project pins pnpm 11.25.0, but the default shim could not resolve that version because DNS lookup for `registry.npmjs.org` failed |
+| `pnpm build` | Passed, exit 0 with the same local pnpm workaround; TypeScript and Vite production build both passed |
+| `cargo check --workspace --all-targets --target x86_64-pc-windows-msvc` | Passed, exit 0 |
+| `cargo fmt --all` and `cargo fmt --all -- --check` | Passed, exit 0 |
+| `pnpm release:msi` | Passed, exit 0 with the local pnpm workaround; rebuilt the Windows x64 worker, staged it, rebuilt the host/frontend, and produced the MSI |
+| `git diff --check` | Passed, exit 0; Git emitted configured LF-to-CRLF conversion warnings |
+| `pnpm test` / `cargo test --workspace` | Not run in this implementation pass |
+
+The MSI from that build was later replaced by the icon/layout correction below.
+The MSI remains unsigned.
+
+No desktop-window print interaction was performed. Manually verify a 115-page
+PDF shows the page-count bound and accepts ranges such as `3–8`, rejects zero,
+reversed, or out-of-document endpoints, prints current/all/range selections
+through Microsoft Print to PDF, opens printer settings, and cancels cleanly.
+Also verify that the custom dialog and the Windows printer dialog appear in
+the intended order. Automated compilation and package generation do not
+verify rendered UI, printer output, or installation behavior.
+
+### MSI icon and setup layout correction — 2026-11-09
+
+The icon source is now a transparent page mark: white page, neon-red outline,
+and a red lightning bolt, with no tile, glow, shadow, or badge. Tauri's local
+icon command regenerated the Windows ICO and related icon sizes. The browser
+favicon uses the same no-background design.
+
+The user-provided installer screenshots showed the custom dark welcome/finish
+bitmap making WiX's native black text unreadable, and the custom banner label
+overlapping page headings. Both bitmap overrides were removed. The MSI now
+uses WiX's standard page layout; its product icon still points to
+`icons/icon.ico` through `ProductIcon` / `ARPPRODUCTICON`.
+
+The local MSI was rebuilt with `pnpm release:msi` (exit 0, using the installed
+pnpm 12.14.0 and the same process-local workaround described above). The
+generated WiX source has the product ICO entry and no custom banner/dialog
+bitmap references. The MSI is
+`target/release/bundle/msi/LitheXPDF_0.1.0_x64_en-US.msi` (8,298,496 bytes;
+SHA-256 `4C323371204EF24972B616B5EA808A1AD521C1CADA54FF1407DA13A1FE81D2D8`).
+The source ICO and packaged ICO SHA-256 values match. The new MSI was not
+installed in this pass, so its screens still need user visual confirmation.
+No tests were run.

@@ -60,6 +60,9 @@ async fn print_pdf(
     document_id: String,
     generation: u64,
     current_page: u32,
+    page_selection: u8,
+    range_start: u32,
+    range_end: u32,
 ) -> Result<PrintJobResult, String> {
     let hwnd = window
         .hwnd()
@@ -69,6 +72,9 @@ async fn print_pdf(
             document_id,
             generation,
             current_page,
+            page_selection,
+            range_start,
+            range_end,
             hwnd.0 as usize as u64,
         )
         .await
@@ -81,8 +87,19 @@ async fn print_pdf(
     document_id: String,
     generation: u64,
     current_page: u32,
+    page_selection: u8,
+    range_start: u32,
+    range_end: u32,
 ) -> Result<PrintJobResult, String> {
-    let _ = (state, document_id, generation, current_page);
+    let _ = (
+        state,
+        document_id,
+        generation,
+        current_page,
+        page_selection,
+        range_start,
+        range_end,
+    );
     Err("Native PDF printing is currently supported on Windows only".into())
 }
 

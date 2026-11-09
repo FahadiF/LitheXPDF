@@ -368,9 +368,9 @@ impl WorkerSession {
     }
 
     fn print(&mut self, payload: &[u8]) -> Result<(Kind, Vec<u8>), (u16, String)> {
-        const PRINT_REQUEST_LEN: usize = 36;
+        const PRINT_REQUEST_LEN: usize = 45;
         if payload.len() != PRINT_REQUEST_LEN {
-            return Err((4, "PRINT payload must be exactly 36 bytes".into()));
+            return Err((4, "PRINT payload must be exactly 45 bytes".into()));
         }
         let tab_id: [u8; 16] = payload[..16]
             .try_into()
@@ -378,6 +378,9 @@ impl WorkerSession {
         let generation = read_u64(payload, 16).map_err(protocol_err)?;
         let current_page = read_u32(payload, 24).map_err(protocol_err)?;
         let owner_window = read_u64(payload, 28).map_err(protocol_err)?;
+        let page_selection = payload[36];
+        let range_start = read_u32(payload, 37).map_err(protocol_err)?;
+        let range_end = read_u32(payload, 41).map_err(protocol_err)?;
         if generation == 0 || self.identity != Some((tab_id, generation)) {
             return Err((
                 6,
@@ -396,6 +399,17 @@ impl WorkerSession {
         if current_page >= page_count {
             return Err((4, "PRINT current page is outside the document".into()));
         }
+        match page_selection {
+            0 | 1 if range_start == 0 && range_end == 0 => {}
+            2 if range_start > 0 && range_start <= range_end && range_end <= page_count => {}
+            0..=2 => return Err((4, "PRINT page-selection metadata is invalid".into())),
+            _ => return Err((4, "PRINT page-selection mode is unknown".into())),
+        }
+        if page_selection == 1 && page_count > 10_000
+            || page_selection == 2 && range_end - range_start + 1 > 10_000
+        {
+            return Err((4, "PRINT is limited to 10,000 pages per job".into()));
+        }
 
         #[cfg(windows)]
         let outcome = {
@@ -405,13 +419,26 @@ impl WorkerSession {
                     "PRINT owner window handle is outside the platform range".into(),
                 )
             })?;
-            print::print_document(document, owner_window, current_page)
-                .map_err(|error| (7, error))?
+            print::print_document(
+                document,
+                owner_window,
+                current_page,
+                page_selection,
+                range_start,
+                range_end,
+            )
+            .map_err(|error| (7, error))?
         };
 
         #[cfg(not(windows))]
         let outcome = {
-            let _ = (document, owner_window);
+            let _ = (
+                document,
+                owner_window,
+                page_selection,
+                range_start,
+                range_end,
+            );
             return Err((
                 7,
                 "Native PDF printing is currently supported on Windows only".into(),

@@ -442,6 +442,9 @@ impl AppState {
         id: String,
         generation: u64,
         current_page: u32,
+        page_selection: u8,
+        range_start: u32,
+        range_end: u32,
         owner_window: u64,
     ) -> Result<PrintJobResult, String> {
         // Keep document activation stable while the worker owns the native
@@ -455,11 +458,39 @@ impl AppState {
             return Err("The current page or LitheXPDF window handle is invalid".into());
         }
 
-        let mut payload = Vec::with_capacity(36);
+        let (selection_kind, selection_start, selection_end) = match page_selection {
+            0 if range_start == 0 && range_end == 0 => (0u8, 0, 0),
+            1 if range_start == 0 && range_end == 0 => {
+                if active.page_count > MAX_PRINT_JOB_PAGES {
+                    return Err(format!(
+                        "Printing is limited to {MAX_PRINT_JOB_PAGES} pages per job. Choose a smaller page range."
+                    ));
+                }
+                (1u8, 0, 0)
+            }
+            2 if range_start > 0
+                && range_start <= range_end
+                && range_end <= active.page_count
+                && range_end - range_start + 1 <= MAX_PRINT_JOB_PAGES =>
+            {
+                (2u8, range_start, range_end)
+            }
+            2 if range_start > 0 && range_start <= range_end && range_end <= active.page_count => {
+                return Err(format!(
+                    "Printing is limited to {MAX_PRINT_JOB_PAGES} pages per job. Choose a smaller page range."
+                ));
+            }
+            _ => return Err("The selected print page range is invalid".into()),
+        };
+
+        let mut payload = Vec::with_capacity(45);
         payload.extend_from_slice(&active.tab);
         payload.extend_from_slice(&generation.to_be_bytes());
         payload.extend_from_slice(&current_page.to_be_bytes());
         payload.extend_from_slice(&owner_window.to_be_bytes());
+        payload.push(selection_kind);
+        payload.extend_from_slice(&selection_start.to_be_bytes());
+        payload.extend_from_slice(&selection_end.to_be_bytes());
         let conn = self.connection().await?;
         let reply = match conn
             .request_until_reply(self.request(Kind::Print, payload)?)

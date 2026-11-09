@@ -1,7 +1,7 @@
 use std::fmt;
 
 pub const MAGIC: [u8; 4] = *b"PDFW";
-pub const VERSION: u16 = 1;
+pub const VERSION: u16 = 2;
 pub const HEADER_LEN: usize = 20;
 pub const MAX_CONTROL_PAYLOAD: usize = 64 * 1024;
 pub const MAX_IMAGE_BYTES: usize = 32 * 1024 * 1024;
@@ -317,7 +317,7 @@ mod tests {
         let a = encode(&frame(Kind::Ready, 0, &[])).unwrap();
         let b = encode(&frame(Kind::Ack, 9, b"ok")).unwrap();
         assert_eq!(&a[..4], b"PDFW");
-        assert_eq!(&a[4..6], &1u16.to_be_bytes());
+        assert_eq!(&a[4..6], &VERSION.to_be_bytes());
         let mut decoder = Decoder::new();
         assert!(decoder.push(&a[..7]).unwrap().is_empty());
         let mut rest = a[7..].to_vec();
@@ -365,10 +365,10 @@ mod tests {
             (
                 {
                     let mut b = encode(&frame(Kind::Ready, 0, &[])).unwrap();
-                    b[5] = 2;
+                    b[5] = (VERSION + 1) as u8;
                     b
                 },
-                ProtocolError::UnsupportedVersion(2),
+                ProtocolError::UnsupportedVersion(VERSION + 1),
             ),
             (
                 {

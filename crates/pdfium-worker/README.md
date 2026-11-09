@@ -1,7 +1,7 @@
 # PDFium worker
 
 The worker owns the only PDFium dependency and runs either the diagnostic
-smoke path or the version-1 `PDFW` framed stdio server. In server mode the
+smoke path or the version-2 `PDFW` framed stdio server. In server mode the
 main OS thread binds PDFium, emits `READY`, and serially handles OPEN, RENDER,
 CLOSE, and SHUTDOWN requests. The Tauri host launches this executable as its
 sidecar and reads raw stdout bytes.
@@ -26,5 +26,6 @@ selected runtime's exact hashes, notice inventory, native imports, tests, and
 remaining packaging limits are recorded in `docs/TESTING.md`.
 
 The supervised server mode accepts `--serve --pdfium-path <absolute-path>`
-and reads binary frames from stdin, writing binary frames to stdout. Diagnostics
-go to stderr. Do not write log text to stdout in server mode.
+and reads binary frames from stdin, writing binary frames to stdout. Protocol
+version 2 includes bounded text search and page-range printing. Diagnostics go
+to stderr. Do not write log text to stdout in server mode.

@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!--
+    Variant A: Clean neon-red outlined document with lightning bolt.
+    Transparent background. "LitheXPDF" text in neon-red badge at bottom.
+    Style inspired by the "Added" icon (flat, bold outline, no filled background).
+  -->
+
+  <!-- Document body: white fill, neon-red thick stroke -->
+  <path
+    d="M112 42h190l98 98v330H112z"
+    fill="#fff"
+    stroke="#ff1e56"
+    stroke-linejoin="round"
+    stroke-width="16"
+  />
+
+  <!-- Folded corner flap -->
+  <path
+    d="M302 42v98h98"
+    fill="none"
+    stroke="#ff1e56"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    stroke-width="16"
+  />
+
+  <!-- Lightning bolt - solid neon red -->
+  <path
+    d="m301 146-117 164h82l-55 137 157-199h-88l62-102z"
+    fill="#ff1e56"
+  />
+
+  <!-- LitheXPDF badge at bottom -->
+  <g transform="translate(128, 408)">
+    <rect width="256" height="44" rx="8" fill="#ff1e56"/>
+    <text
+      x="128" y="30"
+      font-family="'Segoe UI', system-ui, -apple-system, sans-serif"
+      font-weight="900"
+      font-size="20"
+      fill="#ffffff"
+      text-anchor="middle"
+      letter-spacing="2.5"
+    >LitheXPDF</text>
+  </g>
+</svg>

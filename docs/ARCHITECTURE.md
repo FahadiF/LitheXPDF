@@ -147,7 +147,7 @@ currently owning the operation lock. Queued cancellation marks the request so
 it is rejected before it writes to the pipe. The worker runs synchronously on
 its main OS thread. This keeps kernel pipe buffers from becoming an unbounded
 work queue. Each frame has a 20-byte header: 4-byte ASCII magic `PDFW`, 2-byte
-protocol version (unsigned big-endian, initially `1`), 2-byte message kind,
+protocol version (unsigned big-endian, currently `2`), 2-byte message kind,
 8-byte request ID, and 4-byte payload length (unsigned big-endian), followed by
 exactly that many payload bytes. Stream reads may split or combine frames;
 the receiver must reassemble by length. Control/request payloads are capped at
@@ -356,13 +356,18 @@ improvement is claimed.
 ## Native Windows printing — 2026-11-09
 
 Printing is a Windows-only worker operation. The asynchronous Tauri `print_pdf`
-command supplies the current document identity, generation, page index, and
-owner window handle to the host. The host validates the active generation and
-sends one bounded `PRINT` frame. The worker displays the native Windows print
-property sheet with the current page selected initially. Users can choose the
-current page, all pages, or up to 16 page ranges; select an installed printer;
-and open printer-specific settings for paper size, orientation, and other
-driver-supported options. Those options vary by printer and driver.
+command supplies the current document identity, generation, page index, page
+selection, and owner window handle to the host. The host validates the active
+generation and selected pages, then sends one bounded `PRINT` frame. LitheXPDF
+first displays its branded page-selection dialog, which shows the document's
+total page count and validates the maximum page number for a range. Users can
+choose the current page, all pages, or one inclusive page range. A job may
+contain at most 10,000 pages; the all-pages option is unavailable for larger
+documents, which can still be printed in smaller ranges. The worker then opens
+the native Windows print property sheet for installed-printer selection and
+printer-driver settings. The native dialog's page-selection controls are
+disabled so they cannot replace the LitheXPDF selection. Paper size,
+orientation, and other options vary by printer and driver.
 
 After confirmation, the worker renders each selected page on its sole PDFium
 owner thread and transfers it directly to the selected printer DC through
@@ -376,7 +381,8 @@ waits for user input. If app exit is requested while that operation is still
 active, shutdown waits asynchronously for the operation lock for up to the
 separate 2-second shutdown grace, then terminates and reaps the worker.
 
-Compilation verifies the host and worker call path, but printer selection,
-page ranges, paper settings, printer output, and shutdown during printing still
-require manual Windows desktop verification. No print reliability,
-performance, or memory improvement is claimed before those checks.
+Compilation verifies the host and worker call path, but LitheXPDF page-range
+selection, printer selection, paper settings, printer output, and shutdown
+during printing still require manual Windows desktop verification. No print
+reliability, performance, or memory improvement is claimed before those
+checks.

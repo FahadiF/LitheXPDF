@@ -46,14 +46,9 @@ body { margin: 0; min-width: 320px; min-height: 100vh; }
   place-items: center;
   width: 40px;
   height: 44px;
-  background: var(--accent);
-  border-radius: 5px;
-  color: white;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: .08em;
-  clip-path: polygon(0 0, 74% 0, 100% 23%, 100% 100%, 0 100%);
+  background: transparent;
 }
+.brand-icon img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .eyebrow { margin: 0 0 3px; color: #91a2a8; font-size: 9px; font-weight: 700; letter-spacing: .17em; }
 .brand-lockup h1 { margin: 0; color: #f1f4f5; font-size: 16px; font-weight: 680; letter-spacing: -.025em; }
 .brand-accent { color: var(--accent-bright); }
@@ -449,6 +444,25 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   color: #e9eef0;
   box-shadow: 0 22px 70px #000a;
 }
+.print-dialog { width: min(500px, calc(100vw - 28px)); }
+.print-document-summary { margin: 12px 0 0; overflow: hidden; color: #aebbc0; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.print-scope-options { display: flex; flex-direction: column; gap: 8px; margin: 18px 0 0; padding: 0; border: 0; }
+.print-scope-options legend { margin-bottom: 9px; color: #bac6ca; font-size: 12px; font-weight: 650; }
+.print-scope-choice { display: flex; align-items: flex-start; gap: 10px; min-width: 0; padding: 11px 12px; border: 1px solid #344147; border-radius: 7px; background: #1d262a; cursor: pointer; }
+.print-scope-choice:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, #1d262a); }
+.print-scope-choice > input { flex: none; margin: 3px 0 0; accent-color: var(--accent); }
+.print-scope-choice > span:not(.print-range-copy) { display: flex; flex-direction: column; gap: 4px; }
+.print-scope-choice strong { color: #e9eef0; font-size: 12px; font-weight: 650; }
+.print-scope-choice small { color: #9aabb0; font-size: 11px; line-height: 1.45; }
+.print-scope-choice:has(input:disabled) { cursor: not-allowed; opacity: .62; }
+.print-range-copy { display: flex; flex: 1; flex-direction: column; gap: 5px; min-width: 0; }
+.print-range-title { width: fit-content; cursor: pointer; }
+.print-range-inputs { display: flex; align-items: center; gap: 9px; margin-top: 4px; }
+.print-range-inputs label { display: flex; align-items: center; gap: 7px; color: #bac6ca; font-size: 11px; }
+.print-range-inputs input { width: 76px; height: 32px; padding: 0 7px; border: 1px solid #3a474d; border-radius: 5px; background: #141b1f; color: #e9eef0; font: 600 12px "Segoe UI", system-ui, sans-serif; text-align: center; font-variant-numeric: tabular-nums; }
+.print-range-inputs input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent); outline-offset: 1px; }
+.print-range-inputs input:disabled { opacity: .5; }
+.print-error { margin: 12px 0 0; color: #ff8d80; font-size: 12px; line-height: 1.45; }
 .about-dialog { width: min(640px, calc(100vw - 28px)); padding: 0; overflow: hidden; }
 .app-dialog::backdrop { background: #080b0dcc; backdrop-filter: blur(2px); }
 .dialog-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
@@ -464,7 +478,8 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .dialog-note { margin: 13px 0 0; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 .about-hero { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto 30px; align-items: start; gap: 15px; padding: 23px 24px 21px; border-bottom: 1px solid #303b40; background: #1d272c; }
-.about-brand-mark { display: grid; place-items: center; width: 46px; height: 52px; border-radius: 6px; background: var(--accent); color: #fff; font-size: 12px; font-weight: 800; letter-spacing: .08em; clip-path: polygon(0 0, 75% 0, 100% 24%, 100% 100%, 0 100%); }
+.about-brand-mark { display: grid; place-items: center; width: 46px; height: 46px; background: transparent; }
+.about-brand-mark img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .about-intro { min-width: 0; padding-top: 1px; }
 .about-intro .eyebrow { margin-bottom: 5px; color: #9aabb0; }
 .about-intro h2 { margin: 0; color: #f1f4f5; font-size: 24px; font-weight: 680; letter-spacing: -.035em; line-height: 1.1; }
@@ -517,6 +532,13 @@ kbd { padding: 2px 5px; border: 1px solid #46535a; border-radius: 3px; backgroun
 :root[data-theme="light"] .zoom-level { color: #52646b; }
 :root[data-theme="light"] .render-options legend, :root[data-theme="light"] .render-choice small, :root[data-theme="light"] .dialog-note, :root[data-theme="light"] .help-list { color: #5b6d74; }
 :root[data-theme="light"] .render-choice { background: #f4f7f8; border-color: #d5dde0; }
+:root[data-theme="light"] .print-document-summary, :root[data-theme="light"] .print-scope-options legend, :root[data-theme="light"] .print-range-inputs label { color: #5b6d74; }
+:root[data-theme="light"] .print-scope-choice { background: #f4f7f8; border-color: #d5dde0; }
+:root[data-theme="light"] .print-scope-choice:has(input:checked) { background: color-mix(in srgb, var(--accent) 7%, #fff); }
+:root[data-theme="light"] .print-scope-choice strong { color: #27343a; }
+:root[data-theme="light"] .print-scope-choice small { color: #64757c; }
+:root[data-theme="light"] .print-range-inputs input { background: #fff; border-color: #c7d1d5; color: #27343a; }
+:root[data-theme="light"] .print-error { color: #b42318; }
 :root[data-theme="light"] kbd { background: #eef2f3; border-color: #cad4d8; color: #34444b; }
 
 .tab-item { display: flex; align-items: stretch; flex: 0 1 250px; min-width: 110px; max-width: 276px; }
@@ -587,15 +609,15 @@ kbd { padding: 2px 5px; border: 1px solid #46535a; border-radius: 3px; backgroun
 .brand-copy .eyebrow { margin: 0; }
 .brand-icon {
   width: 42px;
-  height: 46px;
-  padding: 2px;
-  border: 1.5px solid var(--accent);
+  height: 42px;
+  padding: 0;
+  border: 0;
   background: transparent;
 }
-.brand-icon svg { width: 34px; height: 38px; }
+.brand-icon img { width: 42px; height: 42px; }
 
 .empty-hero-graphic { background: transparent; }
-.empty-hero-graphic svg { display: block; }
+.empty-hero-graphic img { display: block; width: 128px; height: 128px; object-fit: contain; }
 .empty-actions { margin-top: 15px; }
 .empty-description { max-width: 42ch; margin: 14px 0 0 !important; line-height: 1.5; }
 .empty-shortcut-hint { display: block; margin-top: 8px; color: #87979d; font-size: 11px; }
@@ -622,8 +644,7 @@ kbd { padding: 2px 5px; border: 1px solid #46535a; border-radius: 3px; backgroun
 .about-dialog { width: min(560px, calc(100vw - 28px)); min-height: min(500px, 90vh); max-height: 90vh; border-radius: 6px; overflow: auto; }
 .about-dialog[open] { display: flex; flex-direction: column; }
 .about-hero { grid-template-columns: 48px minmax(0, 1fr) auto 30px; align-items: center; padding: 25px 28px 22px; }
-.about-brand-mark { width: 46px; height: 52px; padding: 2px; border: 1.5px solid var(--accent); background: transparent; }
-.about-brand-mark svg { display: block; width: 38px; height: 44px; }
+.about-brand-mark { width: 46px; height: 46px; padding: 0; border: 0; background: transparent; }
 .about-content { display: flex; flex: 1; flex-direction: column; gap: 17px; padding: 21px 28px 18px; border-bottom: 0; }
 .about-links { gap: 9px; }
 .about-link { grid-template-columns: 34px minmax(0, 1fr) 16px; min-height: 55px; padding: 7px 11px; border-color: #59303b; border-radius: 6px; background: #1c252a; }
@@ -729,12 +750,11 @@ kbd { padding: 2px 5px; border: 1px solid #46535a; border-radius: 3px; backgroun
   .topbar { padding-left: 10px; padding-right: 10px; }
   .topbar-leading { gap: 9px; }
   .brand-lockup { gap: 8px; }
-  .brand-icon { width: 38px; height: 42px; }
-  .brand-icon svg { width: 30px; height: 34px; }
+  .brand-icon { width: 38px; height: 38px; }
+  .brand-icon img { width: 38px; height: 38px; }
   .about-dialog { width: min(520px, calc(100vw - 24px)); min-height: 0; max-height: 90vh; }
   .about-hero { grid-template-columns: 42px minmax(0, 1fr) auto 28px; gap: 10px; padding: 19px 17px 16px; }
-  .about-brand-mark { width: 42px; height: 48px; }
-  .about-brand-mark svg { width: 34px; height: 40px; }
+  .about-brand-mark { width: 42px; height: 42px; }
   .about-version { min-width: 64px; }
   .about-content { gap: 14px; padding: 16px 17px; }
   .about-dialog .dialog-actions { padding: 13px 17px 17px; }

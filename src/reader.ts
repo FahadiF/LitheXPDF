@@ -8,7 +8,7 @@ const MAX_DIMENSION = 8192;
 const MAX_PIXELS = 8_388_608;
 const MAX_SEARCH_RESULTS = 250;
 const MAX_SEARCH_EXCERPT_BYTES = 128;
-const VERSION = 1;
+const VERSION = 2;
 const PAGE_KIND = 0x8003;
 const PREFETCH_INITIAL_DELAY_MS = 250;
 const PREFETCH_CONTINUATION_DELAY_MS = 16;
@@ -21,12 +21,14 @@ const PAGE_CACHE_BACKTRACK = 2;
 const PAGE_CACHE_MAX_PAGES = 30;
 const MAX_TABS = 100;
 const MAX_RECENT_FILES = 10;
+const MAX_PRINT_JOB_PAGES = 10_000;
 const RECENT_STORAGE_KEY = "lithexpdf.recent";
 const RENDER_MODE_STORAGE_KEY = "lithexpdf.renderMode.v3";
 const APP_VERSION = "0.1.0";
 
 type RenderMode = "current" | "nearby" | "balanced" | "maximum";
 type PageRotation = 0 | 90 | 180 | 270;
+type PrintScope = "currentPage" | "allPages" | "range";
 
 interface ReaderTab {
   id: string;
@@ -163,6 +165,15 @@ export class PdfReaderUi {
   private readonly rotateRightButton: HTMLButtonElement | null;
   private readonly zoomLevel: HTMLElement | null;
   private readonly printButton: HTMLButtonElement | null;
+  private readonly printDialog: HTMLDialogElement;
+  private readonly printDocumentSummary: HTMLElement;
+  private readonly printCurrentSummary: HTMLElement;
+  private readonly printAllSummary: HTMLElement;
+  private readonly printRangeSummary: HTMLElement;
+  private readonly printAllPages: HTMLInputElement;
+  private readonly printRangeStart: HTMLInputElement;
+  private readonly printRangeEnd: HTMLInputElement;
+  private readonly printError: HTMLElement;
   private readonly tabs: ReaderTab[] = [];
   private activeTabId?: string;
   private zoom = 1;
@@ -237,6 +248,15 @@ export class PdfReaderUi {
     this.rotateRightButton = this.optional<HTMLButtonElement>("#rotate-right-button");
     this.zoomLevel = this.optional("#zoom-level");
     this.printButton = this.optional<HTMLButtonElement>("#print-button");
+    this.printDialog = this.required<HTMLDialogElement>("#print-dialog");
+    this.printDocumentSummary = this.required("#print-document-summary");
+    this.printCurrentSummary = this.required("#print-current-summary");
+    this.printAllSummary = this.required("#print-all-summary");
+    this.printRangeSummary = this.required("#print-range-summary");
+    this.printAllPages = this.required<HTMLInputElement>("#print-all-pages");
+    this.printRangeStart = this.required<HTMLInputElement>("#print-range-start");
+    this.printRangeEnd = this.required<HTMLInputElement>("#print-range-end");
+    this.printError = this.required("#print-error");
     const versionElement = this.optional("#app-version");
     if (versionElement) versionElement.textContent = APP_VERSION;
     this.openButton.addEventListener("click", () => void this.openPicker());
@@ -246,7 +266,7 @@ export class PdfReaderUi {
     this.zoomOutButton?.addEventListener("click", () => this.changeZoom(-0.1));
     this.rotateLeftButton?.addEventListener("click", () => this.rotateCurrentView(-90));
     this.rotateRightButton?.addEventListener("click", () => this.rotateCurrentView(90));
-    this.printButton?.addEventListener("click", () => void this.printDocument());
+    this.printButton?.addEventListener("click", () => this.openPrintDialog());
     this.menuButton?.addEventListener("click", () => this.setMenuOpen(this.menuPanel?.hidden ?? true));
     this.recentMenuWrap?.addEventListener("pointerenter", () => this.setRecentMenuOpen(true));
     this.recentMenuWrap?.addEventListener("pointerleave", () => this.setRecentMenuOpen(false));
@@ -270,7 +290,7 @@ export class PdfReaderUi {
     this.optional<HTMLButtonElement>("#menu-zoom-out")?.addEventListener("click", () => { this.setMenuOpen(false); this.changeZoom(-0.1); });
     this.optional<HTMLButtonElement>("#menu-rotate-left")?.addEventListener("click", () => { this.setMenuOpen(false); this.rotateCurrentView(-90); });
     this.optional<HTMLButtonElement>("#menu-rotate-right")?.addEventListener("click", () => { this.setMenuOpen(false); this.rotateCurrentView(90); });
-    this.optional<HTMLButtonElement>("#menu-print")?.addEventListener("click", () => { this.setMenuOpen(false); void this.printDocument(); });
+    this.optional<HTMLButtonElement>("#menu-print")?.addEventListener("click", () => { this.setMenuOpen(false); this.openPrintDialog(); });
     this.optional<HTMLButtonElement>("#menu-settings")?.addEventListener("click", () => { this.setMenuOpen(false); this.showDialog("#settings-dialog"); });
     this.optional<HTMLButtonElement>("#menu-about")?.addEventListener("click", () => { this.setMenuOpen(false); this.showDialog("#about-dialog"); });
     this.optional<HTMLButtonElement>("#menu-help")?.addEventListener("click", () => { this.setMenuOpen(false); this.showDialog("#help-dialog"); });
@@ -283,6 +303,15 @@ export class PdfReaderUi {
         if (radio.checked) this.setRenderMode(radio.value);
       });
     });
+    this.appDocument().querySelectorAll<HTMLInputElement>('input[name="print-scope"]').forEach((radio) => {
+      radio.addEventListener("change", () => {
+        this.updatePrintScopeControls();
+        this.updatePrintRangeSummary();
+      });
+    });
+    this.printRangeStart.addEventListener("input", () => this.updatePrintRangeSummary());
+    this.printRangeEnd.addEventListener("input", () => this.updatePrintRangeSummary());
+    this.required<HTMLButtonElement>("#print-confirm").addEventListener("click", () => void this.submitPrintDocument());
     this.appDocument().querySelectorAll<HTMLElement>("[data-dialog-close]").forEach((button) => {
       button.addEventListener("click", () => this.closeDialog(button.closest("dialog")));
     });
@@ -469,7 +498,7 @@ export class PdfReaderUi {
     if (key === "o") { event.preventDefault(); void this.openPicker(); }
     else if (key === "t") { event.preventDefault(); void this.openPicker(); }
     else if (key === "w") { event.preventDefault(); void this.close(); }
-    else if (key === "p") { event.preventDefault(); void this.printDocument(); }
+    else if (key === "p") { event.preventDefault(); this.openPrintDialog(); }
     else if (key === "+" || key === "=") { event.preventDefault(); this.changeZoom(0.1); }
     else if (key === "-") { event.preventDefault(); this.changeZoom(-0.1); }
     else if (key === "tab" && this.tabs.length > 1) {
@@ -564,17 +593,95 @@ export class PdfReaderUi {
     image.style.transform = `translate(-50%, -50%) rotate(${this.rotation}deg)`;
   }
 
-  private async printDocument(): Promise<void> {
+  private selectedPrintScope(): PrintScope {
+    const selected = this.optional<HTMLInputElement>('input[name="print-scope"]:checked')?.value;
+    return selected === "allPages" || selected === "range" ? selected : "currentPage";
+  }
+
+  private openPrintDialog(): void {
     const doc = this.current;
     if (!doc) return;
-    const generationToken = this.generationToken;
+    const pageCount = doc.page_count;
+    const currentPage = this.pageIndex + 1;
+    const scope = this.optional<HTMLInputElement>('input[name="print-scope"][value="currentPage"]');
+    if (!scope) return;
+    scope.checked = true;
+    this.printDocumentSummary.textContent = `${this.name.textContent || "PDF document"} · ${pageCount.toLocaleString()} ${pageCount === 1 ? "page" : "pages"}`;
+    this.printCurrentSummary.textContent = `Page ${currentPage.toLocaleString()} of ${pageCount.toLocaleString()}`;
+    this.printAllPages.disabled = pageCount > MAX_PRINT_JOB_PAGES;
+    this.printAllSummary.textContent = pageCount > MAX_PRINT_JOB_PAGES
+      ? `This worker limits one print job to ${MAX_PRINT_JOB_PAGES.toLocaleString()} pages. Choose a smaller range.`
+      : `Pages 1–${pageCount.toLocaleString()} of ${pageCount.toLocaleString()}`;
+    for (const input of [this.printRangeStart, this.printRangeEnd]) {
+      input.min = "1";
+      input.max = String(pageCount);
+      input.value = String(currentPage);
+    }
+    this.printError.hidden = true;
+    this.printError.textContent = "";
+    this.updatePrintScopeControls();
+    this.updatePrintRangeSummary();
+    this.showDialog("#print-dialog");
+  }
+
+  private updatePrintScopeControls(): void {
+    const isRange = this.selectedPrintScope() === "range";
+    this.printRangeStart.disabled = !isRange;
+    this.printRangeEnd.disabled = !isRange;
+  }
+
+  private updatePrintRangeSummary(): void {
+    const start = Number(this.printRangeStart.value);
+    const end = Number(this.printRangeEnd.value);
+    const pageCount = this.current?.page_count ?? 0;
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 1 || end < start || end > pageCount) {
+      this.printRangeSummary.textContent = `Enter a range from 1 to ${pageCount.toLocaleString()} pages`;
+      return;
+    }
+    this.printRangeSummary.textContent = `Pages ${start.toLocaleString()}–${end.toLocaleString()} of ${pageCount.toLocaleString()} · ${end - start + 1} ${(end - start + 1) === 1 ? "page" : "pages"}`;
+  }
+
+  private async submitPrintDocument(): Promise<void> {
+    const doc = this.current;
+    if (!doc) return;
+    const pageCount = doc.page_count;
     const pageIndex = this.pageIndex;
-    this.status.textContent = "Opening print settings";
+    const scope = this.selectedPrintScope();
+    let rangeStart = 0;
+    let rangeEnd = 0;
+    if (scope === "allPages" && pageCount > MAX_PRINT_JOB_PAGES) {
+      this.printError.textContent = `A print job can contain at most ${MAX_PRINT_JOB_PAGES.toLocaleString()} pages. Choose a page range instead.`;
+      this.printError.hidden = false;
+      return;
+    }
+    if (scope === "range") {
+      rangeStart = Number(this.printRangeStart.value);
+      rangeEnd = Number(this.printRangeEnd.value);
+      if (!Number.isSafeInteger(rangeStart) || !Number.isSafeInteger(rangeEnd)
+        || rangeStart < 1 || rangeEnd < rangeStart || rangeEnd > pageCount) {
+        this.printError.textContent = `Enter a valid page range from 1 to ${pageCount.toLocaleString()}.`;
+        this.printError.hidden = false;
+        this.printRangeStart.focus();
+        return;
+      }
+      if (rangeEnd - rangeStart + 1 > MAX_PRINT_JOB_PAGES) {
+        this.printError.textContent = `A print job can contain at most ${MAX_PRINT_JOB_PAGES.toLocaleString()} pages. Choose a smaller range.`;
+        this.printError.hidden = false;
+        this.printRangeStart.focus();
+        return;
+      }
+    }
+    const generationToken = this.generationToken;
+    this.closeDialog(this.printDialog);
+    this.status.textContent = "Opening printer settings";
     try {
       const result = await this.bridge.invoke<{ cancelled: boolean; pages_printed: number }>("print_pdf", {
         documentId: doc.document_id,
         generation: doc.generation,
         currentPage: pageIndex,
+        pageSelection: scope === "currentPage" ? 0 : scope === "allPages" ? 1 : 2,
+        rangeStart,
+        rangeEnd,
       });
       if (generationToken !== this.generationToken || this.current?.document_id !== doc.document_id
         || this.current.generation !== doc.generation) return;

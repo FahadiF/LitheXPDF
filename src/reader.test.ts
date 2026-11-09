@@ -16,7 +16,7 @@ function pageFrame(pageIndex = 0, generation = 7, image = [0x89, 0x50, 0x4e, 0x4
   const bytes = new Uint8Array(buffer);
   bytes.set([0x50, 0x44, 0x46, 0x57]);
   const view = new DataView(buffer);
-  view.setUint16(4, 1, false); view.setUint16(6, 0x8003, false); view.setBigUint64(8, 19n, false); view.setUint32(16, payloadLength, false);
+  view.setUint16(4, 2, false); view.setUint16(6, 0x8003, false); view.setBigUint64(8, 19n, false); view.setUint32(16, payloadLength, false);
   bytes.set(documentId === id ? tab : Uint8Array.from(documentId.match(/../g)!.map((x) => Number.parseInt(x, 16))), 20); view.setBigUint64(36, BigInt(generation), false); view.setUint32(44, pageIndex, false);
   view.setUint32(48, width, false); view.setUint32(52, height, false); view.setUint16(56, 1, false); view.setUint32(58, image.length, false);
   bytes.set(image, 62);
@@ -67,6 +67,13 @@ describe("reader image lifecycle", () => {
       <input id="search-match-case" type="checkbox"/><input id="search-whole-word" type="checkbox"/>
       <aside id="search-panel" hidden><button id="search-panel-close"></button><p id="search-summary"></p><ol id="search-results"></ol></aside>
       <button id="theme-toggle"></button>
+      <dialog id="print-dialog">
+        <p id="print-document-summary"></p><p id="print-current-summary"></p>
+        <p id="print-all-summary"></p><p id="print-range-summary"></p>
+        <input id="print-all-pages" type="radio" name="print-scope" value="allPages" />
+        <input id="print-range-start" type="number" /><input id="print-range-end" type="number" />
+        <p id="print-error" hidden></p><button id="print-confirm" type="button"></button>
+      </dialog>
       <section id="viewer"><div id="loading-state" class="loading-state" hidden></div><div id="page-stack" class="page-stack" hidden><img id="page-image" hidden></div><div id="empty-state" class="empty-state"></div><div id="error-state" class="error-state" hidden></div></section></main>`;
   });
 
