@@ -23,7 +23,7 @@ body { margin: 0; min-width: 320px; min-height: 100vh; }
   height: 100vh;
   min-height: 420px;
   display: grid;
-  grid-template-rows: 76px 38px 42px minmax(0, 1fr) 30px;
+  grid-template-rows: 76px 38px minmax(0, 1fr) 30px;
   background: #111619;
 }
 
@@ -101,19 +101,6 @@ body { margin: 0; min-width: 320px; min-height: 100vh; }
 .toolbar > .button, .toolbar .page-jump, .toolbar .search-control { align-self: center; }
 .toolbar-divider { height: 23px; margin: 0 6px; border-left: 1px solid #39444a; }
 .page-counter { min-width: 58px; text-align: center; color: #c3cdd1; font-size: 12px; font-variant-numeric: tabular-nums; }
-
-.document-bar {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 0 25px;
-  border-bottom: 1px solid #252e33;
-  background: #151c20;
-}
-.document-mark { width: 7px; height: 7px; flex: none; border-radius: 50%; background: #687980; }
-.document-bar p { margin: 0; color: #aebbc0; font-size: 11px; }
-.document-bar #document-name { max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #d7dfe2; font-weight: 600; }
-.document-bar #status-text { margin-left: auto; color: #82939a; }
 
 .viewer {
   position: relative;
@@ -204,6 +191,7 @@ body { margin: 0; min-width: 320px; min-height: 100vh; }
 }
 
 .footer { display: flex; align-items: center; justify-content: space-between; padding: 0 25px; border-top: 1px solid #2a3439; background: #171e22; color: #77888e; font-size: 10px; }
+.footer #status-text { color: inherit; }
 button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .side-panel {
@@ -239,9 +227,6 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 :root[data-theme="light"] .eyebrow-bolt { color: #c21842; }
 :root[data-theme="light"] .search-icon-prefix { color: #667984; }
 :root[data-theme="light"] .eyebrow, :root[data-theme="light"] .footer { color: #64757c; }
-:root[data-theme="light"] .document-bar { background: #f2f5f6; border-color: #d5dde0; }
-:root[data-theme="light"] .document-bar p, :root[data-theme="light"] .document-bar #document-name { color: #34444b; }
-:root[data-theme="light"] .document-bar #status-text { color: #60727a; }
 :root[data-theme="light"] .viewer { background-color: #e3e9eb; background-image: radial-gradient(#34444b12 .7px, transparent .7px); scrollbar-color: #aab7bc #e3e9eb; }
 :root[data-theme="light"] .button, :root[data-theme="light"] .icon-button, :root[data-theme="light"] .bookmark-remove { background: #fff; border-color: #c7d1d5; color: #34444b; }
 :root[data-theme="light"] .button:hover:not(:disabled), :root[data-theme="light"] .result-list button:hover, :root[data-theme="light"] .bookmark-open:hover { background: #e8eef0; border-color: #9eacb2; }
@@ -259,7 +244,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 :root[data-theme="light"] .error-state { background: #fff1ef; border-color: #d9877e; color: #762c25; }
 
 @media (max-width: 1100px) {
-  .app-shell { grid-template-rows: auto 38px 42px minmax(0, 1fr) 30px; }
+  .app-shell { grid-template-rows: auto 38px minmax(0, 1fr) 30px; }
   .topbar { min-height: 76px; height: auto; flex-wrap: wrap; justify-content: space-between; gap: 10px; row-gap: 8px; padding: 10px 16px; }
   .topbar-leading { gap: 10px; }
   .toolbar { flex: 1 1 100%; flex-wrap: wrap; justify-content: flex-end; }
@@ -267,7 +252,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 
 @media (max-width: 640px) {
-  .app-shell { grid-template-rows: auto 36px 40px minmax(0, 1fr) 28px; }
+  .app-shell { grid-template-rows: auto 36px minmax(0, 1fr) 28px; }
   .topbar { padding: 10px 12px; }
   .topbar-leading { gap: 8px; }
   .toolbar { width: 100%; flex: 1 1 100%; justify-content: flex-start; gap: 5px; }
@@ -738,7 +723,7 @@ kbd { padding: 2px 5px; border: 1px solid #46535a; border-radius: 3px; backgroun
 :root[data-theme="light"] .window-control-close:hover { background: #c42b1f; color: #fff; }
 
 @media (max-width: 1400px) {
-  :root[data-window-chrome="custom"] .app-shell { grid-template-rows: auto 38px 42px minmax(0, 1fr) 30px; }
+  :root[data-window-chrome="custom"] .app-shell { grid-template-rows: auto 38px minmax(0, 1fr) 30px; }
   :root[data-window-chrome="custom"] .topbar {
     grid-template-columns: minmax(0, 1fr) max-content;
     grid-template-areas: "leading window" "toolbar toolbar";

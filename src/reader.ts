@@ -1597,7 +1597,6 @@ export class PdfReaderUi {
   }
   private updateControls(): void {
     const doc = this.current;
-    this.name.hidden = Boolean(doc);
     this.closeButton.disabled = !doc;
     if (this.zoomInButton) this.zoomInButton.disabled = !doc || this.zoom >= 4;
     if (this.zoomOutButton) this.zoomOutButton.disabled = !doc || this.zoom <= 0.25;

@@ -204,11 +204,7 @@
         <p id="tabs-empty" class="tabs-empty">No documents open</p>
         <button id="new-tab-button" class="new-tab-button" type="button" aria-label="Open a PDF in a new tab" title="New tab (Ctrl+T)">+</button>
       </nav>
-      <section class="document-bar">
-        <span class="document-mark" aria-hidden="true"></span>
-        <p id="document-name">No document open</p>
-        <p id="status-text" role="status" aria-live="polite">Choose a PDF to begin.</p>
-      </section>
+      <span id="document-name" hidden></span>
       <section id="viewer" class="viewer" aria-label="PDF page">
         <div id="empty-state" class="empty-state">
           <div class="empty-hero-graphic" aria-hidden="true">
@@ -255,10 +251,9 @@
       </section>
       <footer class="footer">
         <div class="footer-left">
-          <span class="footer-badge">PDFIUM</span>
-          <span>One active PDFium document</span>
+          <span id="page-size"></span>
         </div>
-        <span id="page-size"></span>
+        <span id="status-text" role="status" aria-live="polite">Choose a PDF to begin.</span>
       </footer>
     </main>
 
