@@ -4,7 +4,8 @@ LitheXPDF is an early-stage Windows PDF reader built with Rust, Tauri 2, TypeScr
 
 **Light on memory. Fast through documents.** That is the goal for the app, not a measured performance claim yet.
 
-<img width="1918" height="1030" alt="image" src="https://github.com/user-attachments/assets/30f67034-fe45-4707-9d7c-bcc202eee6d1" />
+<img width="1158" height="902" alt="image" src="https://github.com/user-attachments/assets/8a00d9ee-fd95-40b7-bc06-263f0b43092d" />
+<img width="1157" height="903" alt="image" src="https://github.com/user-attachments/assets/fe01640b-c83c-4416-b8fe-30b55183e7b9" />
 
 ## Current status
 
