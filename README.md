@@ -2,10 +2,11 @@
 
 LitheXPDF is an early-stage Windows PDF reader built with Rust, Tauri 2, TypeScript, and PDFium. The long-term goal is a lightweight reader that can keep 30 or more documents open in tabs.
 
-**Light on memory. Fast through documents.** That is the goal for the app, not a measured performance claim yet.
+**Light on memory. Fast through documents.**
 
-<img width="1158" height="902" alt="image" src="https://github.com/user-attachments/assets/8a00d9ee-fd95-40b7-bc06-263f0b43092d" />
-<img width="1157" height="903" alt="image" src="https://github.com/user-attachments/assets/fe01640b-c83c-4416-b8fe-30b55183e7b9" />
+<img width="1106" height="694" alt="image" src="https://github.com/user-attachments/assets/ea50296f-ac00-428c-96e1-b8a7c77d8d5d" />
+
+<img width="1160" height="841" alt="image" src="https://github.com/user-attachments/assets/438efc2b-6a73-4fba-855c-01484d841cef" />
 
 ## Current status
 
