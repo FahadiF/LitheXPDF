@@ -2,13 +2,26 @@ import "./styles.css";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import brandIconUrl from "../src-tauri/icons/lithexpdf.png";
 import { PdfReaderUi } from "./reader";
 import { installThemeToggle } from "./theme";
 
-new PdfReaderUi(document, {
+document.querySelectorAll<HTMLImageElement>("img[data-brand-icon]").forEach((image) => {
+  image.src = brandIconUrl;
+});
+const favicon = document.querySelector<HTMLLinkElement>("#app-favicon");
+if (favicon) favicon.href = brandIconUrl;
+
+const reader = new PdfReaderUi(document, {
+  isDesktop: isTauri(),
   pickPdf: () => open({ multiple: true, directory: false, filters: [{ name: "PDF documents", extensions: ["pdf"] }] }),
   invoke: (command, args) => invoke(command, args),
 });
+if (isTauri()) {
+  void invoke<string | null>("take_startup_pdf_path")
+    .then((path) => { if (path) return reader.open(path); })
+    .catch((error: unknown) => console.error("Unable to open the PDF passed to LitheXPDF.", error));
+}
 installThemeToggle(document.documentElement, (() => {
   try { return window.localStorage; } catch { return undefined; }
 })());

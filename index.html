@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0c1014" />
     <title>LitheXPDF — Desktop PDF Reader</title>
-    <link rel="icon" type="image/png" sizes="512x512" href="/icons/lithexpdf.png" />
+    <link id="app-favicon" rel="icon" type="image/png" sizes="512x512" />
   </head>
   <body>
     <main class="app-shell" aria-labelledby="app-title">
@@ -119,7 +119,7 @@
           </div>
           <div class="brand-lockup">
             <span class="brand-icon" data-tauri-drag-region aria-hidden="true">
-              <img src="/icons/lithexpdf.png" alt="" width="38" height="38" />
+              <img data-brand-icon alt="" width="38" height="38" />
             </span>
             <div class="brand-copy">
               <h1 id="app-title" data-tauri-drag-region>LitheX<span class="brand-accent">PDF</span></h1>
@@ -212,7 +212,7 @@
       <section id="viewer" class="viewer" aria-label="PDF page">
         <div id="empty-state" class="empty-state">
           <div class="empty-hero-graphic" aria-hidden="true">
-            <img src="/icons/lithexpdf.png" alt="" width="128" height="128" />
+            <img data-brand-icon alt="" width="128" height="128" />
           </div>
           <h2>Your PDFs, ready to read</h2>
           <div class="empty-actions">
@@ -312,31 +312,73 @@
       </div>
       <fieldset class="render-options">
         <legend>Page rendering</legend>
-        <label class="render-choice">
-          <input type="radio" name="render-mode" value="current" />
-          <span><strong>On demand</strong><small>Renders the page you reach. Nearby rendered pages are released, so scrolling can pause while a new page is prepared.</small></span>
-        </label>
-        <label class="render-choice">
-          <input type="radio" name="render-mode" value="nearby" />
-          <span><strong>Light · 3 pages ahead</strong><small>Starts shortly after the first page appears and keeps a small decoded window around your position.</small></span>
-        </label>
-        <label class="render-choice">
-          <input type="radio" name="render-mode" value="balanced" />
-          <span><strong>Recommended · 12 pages ahead</strong><small>Default. Begins in the background shortly after opening, then keeps nearby pages ready as you scroll.</small></span>
-        </label>
-        <label class="render-choice">
-          <input type="radio" name="render-mode" value="maximum" />
-          <span><strong>Maximum · up to 30 cached pages</strong><small>Highest background CPU and cache use. It fills a rolling window; it does not render every page of a long document at once.</small></span>
-        </label>
+        <div class="render-choice">
+          <label class="render-choice-main"><input id="high-quality-rendering" type="checkbox" /><span><strong>Prioritize image quality</strong></span></label>
+          <button class="info-toggle" type="button" aria-label="More about image quality" aria-controls="render-info-quality" aria-expanded="false" data-option-info>i</button>
+          <p id="render-info-quality" class="choice-info" hidden>On by default. Renders at up to 2× display density for clearer text and fine details. It may take longer and use more image-cache memory. The worker's bitmap and image-size limits still apply; Speed uses standard display density.</p>
+        </div>
+        <div class="render-choice">
+          <label class="render-choice-main"><input type="radio" name="render-mode" value="current" /><span><strong>On demand</strong></span></label>
+          <button class="info-toggle" type="button" aria-label="More about On demand rendering" aria-controls="render-info-current" aria-expanded="false" data-option-info>i</button>
+          <p id="render-info-current" class="choice-info" hidden>Renders the page you reach. Nearby rendered pages are released, so scrolling can pause while a new page is prepared.</p>
+        </div>
+        <div class="render-choice">
+          <label class="render-choice-main"><input type="radio" name="render-mode" value="nearby" /><span><strong>Light · 3 pages ahead</strong></span></label>
+          <button class="info-toggle" type="button" aria-label="More about Light preloading" aria-controls="render-info-nearby" aria-expanded="false" data-option-info>i</button>
+          <p id="render-info-nearby" class="choice-info" hidden>Starts shortly after the first page appears and keeps a small decoded window around your position.</p>
+        </div>
+        <div class="render-choice">
+          <label class="render-choice-main"><input type="radio" name="render-mode" value="balanced" /><span><strong>Recommended · 12 pages ahead</strong></span></label>
+          <button class="info-toggle" type="button" aria-label="More about Recommended preloading" aria-controls="render-info-balanced" aria-expanded="false" data-option-info>i</button>
+          <p id="render-info-balanced" class="choice-info" hidden>Default. Begins in the background shortly after opening, then keeps nearby pages ready as you scroll.</p>
+        </div>
+        <div class="render-choice">
+          <label class="render-choice-main"><input type="radio" name="render-mode" value="maximum" /><span><strong>Maximum · up to 30 cached pages</strong></span></label>
+          <button class="info-toggle" type="button" aria-label="More about Maximum preloading" aria-controls="render-info-maximum" aria-expanded="false" data-option-info>i</button>
+          <p id="render-info-maximum" class="choice-info" hidden>Highest background CPU and cache use. It fills a rolling window; it does not render every page of a long document at once.</p>
+        </div>
       </fieldset>
-      <p class="dialog-note">Only the active document is prepared; background tabs keep metadata only. The rolling cache is capped at 64 MiB of encoded page data, 64 MiB of estimated decoded pixels, and 30 page images. Larger budgets use more background CPU and memory. These are enforced limits and estimates, not measured system-memory savings.</p>
+      <fieldset id="windows-options" class="render-options windows-options">
+        <legend>Windows integration</legend>
+        <div class="render-choice">
+          <label class="render-choice-main"><input id="default-pdf-prompt-toggle" type="checkbox" /><span><strong>Ask me to set LitheXPDF as default at startup</strong></span></label>
+          <button class="info-toggle" type="button" aria-label="More about the default PDF reminder" aria-controls="default-pdf-info" aria-expanded="false" data-option-info>i</button>
+          <p id="default-pdf-info" class="choice-info" hidden>Windows requires you to confirm the PDF app in Settings. This checkbox only controls the reminder.</p>
+        </div>
+        <button id="open-default-app-settings" class="button" type="button">Choose default PDF app in Windows</button>
+        <p id="default-app-error" class="dialog-note" role="alert" hidden></p>
+      </fieldset>
+      <div class="settings-info">
+        <button class="info-toggle" type="button" aria-label="More about image cache limits" aria-controls="cache-info" aria-expanded="false" data-option-info>i</button>
+        <p id="cache-info" class="choice-info" hidden>Only the active document is prepared; background tabs keep metadata only. The rolling cache is capped at 64 MiB of encoded page data, 64 MiB of estimated decoded pixels, and 30 page images. Larger budgets use more background CPU and memory. These are enforced limits and estimates, not measured system-memory savings.</p>
+      </div>
       <div class="dialog-actions"><button class="button button-primary" type="button" data-dialog-close>Done</button></div>
+    </dialog>
+
+    <dialog id="default-pdf-dialog" class="app-dialog default-pdf-dialog" aria-labelledby="default-pdf-title">
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow">WINDOWS FILE ASSOCIATION</p>
+          <h2 id="default-pdf-title">Make LitheXPDF your default PDF app?</h2>
+        </div>
+        <button class="icon-button" type="button" data-dialog-close aria-label="Close default app prompt">×</button>
+      </div>
+      <p class="dialog-note">Windows will open LitheXPDF's Default apps page. Click the .pdf row (it may show your current reader), choose LitheXPDF in the picker, and confirm. Windows requires your confirmation.</p>
+      <label class="render-choice-main default-pdf-dont-ask">
+        <input id="default-pdf-dont-ask" type="checkbox" />
+        <span><strong>Don't ask me again</strong></span>
+      </label>
+      <div class="dialog-actions">
+        <button id="default-pdf-later" class="button" type="button">Not now</button>
+        <button id="default-pdf-open-settings" class="button button-primary" type="button">Open Windows Settings</button>
+      </div>
+      <p id="default-pdf-error" class="dialog-note" role="alert" hidden></p>
     </dialog>
 
     <dialog id="about-dialog" class="app-dialog about-dialog" aria-labelledby="about-title">
       <header class="about-hero">
         <span class="about-brand-mark" aria-hidden="true">
-          <img src="/icons/lithexpdf.png" alt="" width="46" height="46" />
+          <img data-brand-icon alt="" width="46" height="46" />
         </span>
         <div class="about-intro">
           <p class="eyebrow">ABOUT</p>

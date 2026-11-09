@@ -1,8 +1,69 @@
 mod supervisor;
 
 use std::path::PathBuf;
+use std::sync::Mutex;
 use supervisor::{AppState, OpenDocumentResult, PrintJobResult, TextSearchResult};
 use tauri::{Manager, RunEvent};
+
+struct StartupPdfPath(Mutex<Option<String>>);
+
+fn pdf_path_from_args(args: impl IntoIterator<Item = std::ffi::OsString>) -> Option<String> {
+    args.into_iter().find_map(|arg| {
+        let path = PathBuf::from(arg);
+        path.extension()
+            .and_then(|extension| extension.to_str())
+            .filter(|extension| extension.eq_ignore_ascii_case("pdf"))
+            .map(|_| path.to_string_lossy().into_owned())
+    })
+}
+
+fn startup_pdf_path() -> Option<String> {
+    pdf_path_from_args(std::env::args_os().skip(1))
+}
+
+#[tauri::command]
+async fn take_startup_pdf_path(state: tauri::State<'_, StartupPdfPath>) -> Result<Option<String>, String> {
+    state
+        .0
+        .lock()
+        .map(|mut path| path.take())
+        .map_err(|_| "Could not read the PDF file passed to LitheXPDF".to_string())
+}
+
+#[cfg(windows)]
+#[tauri::command]
+async fn open_default_pdf_settings() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let operation: Vec<u16> = "open".encode_utf16().chain(std::iter::once(0)).collect();
+        let uri: Vec<u16> = "ms-settings:defaultapps?registeredAppMachine=LitheXPDF"
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        let result = unsafe {
+            windows_sys::Win32::UI::Shell::ShellExecuteW(
+                std::ptr::null_mut(),
+                operation.as_ptr(),
+                uri.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL,
+            )
+        };
+        if (result as isize) > 32 {
+            Ok(())
+        } else {
+            Err(format!("Windows could not open Default apps (ShellExecuteW returned {})", result as isize))
+        }
+    })
+    .await
+    .map_err(|error| format!("Could not start the Windows settings request: {error}"))?
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+async fn open_default_pdf_settings() -> Result<(), String> {
+    Err("Default PDF app settings are currently supported on Windows only".into())
+}
 
 #[tauri::command]
 async fn open_pdf(
@@ -140,9 +201,12 @@ pub fn run() {
         .setup(|app| {
             let pdfium_path = resolve_pdfium_path(app.handle())?;
             app.manage(AppState::new(app.handle().clone(), pdfium_path));
+            app.manage(StartupPdfPath(Mutex::new(startup_pdf_path())));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            take_startup_pdf_path,
+            open_default_pdf_settings,
             open_pdf,
             render_page,
             search_text,

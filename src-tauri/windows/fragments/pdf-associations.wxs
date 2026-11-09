@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <DirectoryRef Id="TARGETDIR">
+      <Component Id="LitheXPDFAssociationRegistration" Guid="*" Win64="yes">
+        <RegistryKey Root="HKLM" Key="Software\Classes\LitheXPDF.PDF" Action="createAndRemoveOnUninstall">
+          <RegistryValue Type="string" Value="LitheXPDF PDF Document" KeyPath="yes" />
+          <RegistryValue Type="string" Name="FriendlyTypeName" Value="LitheXPDF PDF Document" />
+        </RegistryKey>
+        <RegistryKey Root="HKLM" Key="Software\Classes\LitheXPDF.PDF\DefaultIcon" Action="createAndRemoveOnUninstall">
+          <RegistryValue Type="string" Value="&quot;[INSTALLDIR]lithexpdf-host.exe&quot;,0" />
+        </RegistryKey>
+        <RegistryKey Root="HKLM" Key="Software\Classes\LitheXPDF.PDF\shell\open\command" Action="createAndRemoveOnUninstall">
+          <RegistryValue Type="string" Value="&quot;[INSTALLDIR]lithexpdf-host.exe&quot; &quot;%1&quot;" />
+        </RegistryKey>
+        <RegistryKey Root="HKLM" Key="Software\Classes\.pdf\OpenWithProgids" Action="createAndRemoveOnUninstall">
+          <RegistryValue Type="string" Name="LitheXPDF.PDF" Value="" />
+        </RegistryKey>
+        <RegistryKey Root="HKLM" Key="Software\Classes\Applications\lithexpdf-host.exe\DefaultIcon" Action="createAndRemoveOnUninstall">
+          <RegistryValue Type="string" Value="&quot;[INSTALLDIR]lithexpdf-host.exe&quot;,0" />
+        </RegistryKey>
+        <RegistryKey Root="HKLM" Key="Software\Classes\Applications\lithexpdf-host.exe\shell\open\command" Action="createAndRemoveOnUninstall">
+          <RegistryValue Type="string" Value="&quot;[INSTALLDIR]lithexpdf-host.exe&quot; &quot;%1&quot;" />
+        </RegistryKey>
+        <RegistryKey Root="HKLM" Key="Software\Classes\Applications\lithexpdf-host.exe\SupportedTypes" Action="createAndRemoveOnUninstall">
+          <RegistryValue Type="string" Name=".pdf" Value="" />
+        </RegistryKey>
+        <RegistryKey Root="HKLM" Key="Software\LitheXPDF\Capabilities" Action="createAndRemoveOnUninstall">
+          <RegistryValue Type="string" Name="ApplicationName" Value="LitheXPDF" />
+          <RegistryValue Type="string" Name="ApplicationDescription" Value="LitheXPDF desktop PDF reader" />
+        </RegistryKey>
+        <RegistryKey Root="HKLM" Key="Software\LitheXPDF\Capabilities\FileAssociations" Action="createAndRemoveOnUninstall">
+          <RegistryValue Type="string" Name=".pdf" Value="LitheXPDF.PDF" />
+        </RegistryKey>
+        <RegistryKey Root="HKLM" Key="Software\RegisteredApplications" Action="createAndRemoveOnUninstall">
+          <RegistryValue Type="string" Name="LitheXPDF" Value="Software\LitheXPDF\Capabilities" />
+        </RegistryKey>
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+</Wix>

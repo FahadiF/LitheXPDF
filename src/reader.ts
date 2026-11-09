@@ -24,7 +24,10 @@ const MAX_RECENT_FILES = 10;
 const MAX_PRINT_JOB_PAGES = 10_000;
 const RECENT_STORAGE_KEY = "lithexpdf.recent";
 const RENDER_MODE_STORAGE_KEY = "lithexpdf.renderMode.v3";
-const APP_VERSION = "0.1.0";
+const RENDER_QUALITY_STORAGE_KEY = "lithexpdf.renderQuality.v1";
+const DEFAULT_PDF_STARTUP_PROMPT_KEY = "lithexpdf.defaultPdfStartupPrompt.v1";
+const DEFAULT_PDF_FIRST_RUN_SEEN_KEY = "lithexpdf.defaultPdfFirstRunSeen.v1";
+const APP_VERSION = "0.1.1";
 
 type RenderMode = "current" | "nearby" | "balanced" | "maximum";
 type PageRotation = 0 | 90 | 180 | 270;
@@ -114,6 +117,7 @@ function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
 export interface ReaderBridge {
   pickPdf(): Promise<string | string[] | null>;
   invoke<T>(command: string, args?: InvokeArgs): Promise<T>;
+  isDesktop?: boolean;
   createObjectURL?(blob: Blob): string;
   revokeObjectURL?(url: string): void;
   bookmarks?: BookmarkStore;
@@ -179,6 +183,7 @@ export class PdfReaderUi {
   private zoom = 1;
   private rotation: PageRotation = 0;
   private renderMode: RenderMode = readRenderMode();
+  private highQualityRendering = readHighQualityRendering();
   private recentPaths = readRecentPaths();
   private pageSlots: HTMLElement[] = [];
   private current?: OpenPdfResult;
@@ -297,6 +302,11 @@ export class PdfReaderUi {
     this.renderTabs();
     this.renderRecentMenu();
     this.syncRenderModeSettings();
+    const qualityToggle = this.optional<HTMLInputElement>("#high-quality-rendering");
+    if (qualityToggle) {
+      qualityToggle.checked = this.highQualityRendering;
+      qualityToggle.addEventListener("change", () => this.setHighQualityRendering(qualityToggle.checked));
+    }
     this.appDocument().querySelectorAll<HTMLInputElement>('input[name="render-mode"]').forEach((radio) => {
       radio.checked = radio.value === this.renderMode;
       radio.addEventListener("change", () => {
@@ -314,6 +324,16 @@ export class PdfReaderUi {
     this.required<HTMLButtonElement>("#print-confirm").addEventListener("click", () => void this.submitPrintDocument());
     this.appDocument().querySelectorAll<HTMLElement>("[data-dialog-close]").forEach((button) => {
       button.addEventListener("click", () => this.closeDialog(button.closest("dialog")));
+    });
+    this.appDocument().querySelectorAll<HTMLButtonElement>("[data-option-info]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const descriptionId = button.getAttribute("aria-controls");
+        if (!descriptionId) return;
+        const description = this.optional<HTMLElement>(`#${descriptionId}`);
+        if (!description) return;
+        description.hidden = !description.hidden;
+        button.setAttribute("aria-expanded", String(!description.hidden));
+      });
     });
     this.appDocument().querySelectorAll<HTMLDialogElement>(".app-dialog").forEach((dialog) => {
       dialog.addEventListener("click", (event) => {
@@ -342,6 +362,7 @@ export class PdfReaderUi {
     this.searchInput.addEventListener("input", () => this.startSearch(false));
     this.searchMatchCase.addEventListener("change", () => this.startSearch(true));
     this.searchWholeWord.addEventListener("change", () => this.startSearch(true));
+    this.setupDefaultPdfAssociation();
   }
 
   private optional<T extends HTMLElement = HTMLElement>(selector: string): T | null {
@@ -472,6 +493,62 @@ export class PdfReaderUi {
     if (!dialog) return;
     if (typeof dialog.close === "function" && dialog.open) dialog.close();
     else dialog.removeAttribute("open");
+  }
+
+  private setupDefaultPdfAssociation(): void {
+    const options = this.optional<HTMLElement>("#windows-options");
+    if (!this.bridge.isDesktop) {
+      if (options) options.hidden = true;
+      return;
+    }
+    const startupPrompt = this.optional<HTMLInputElement>("#default-pdf-prompt-toggle");
+    const storage = this.safeStorage();
+    if (startupPrompt) {
+      try { startupPrompt.checked = storage?.getItem(DEFAULT_PDF_STARTUP_PROMPT_KEY) === "true"; } catch { startupPrompt.checked = false; }
+      startupPrompt.addEventListener("change", () => {
+        try { storage?.setItem(DEFAULT_PDF_STARTUP_PROMPT_KEY, String(startupPrompt.checked)); } catch { /* The current choice still works for this session. */ }
+      });
+    }
+
+    this.optional<HTMLButtonElement>("#open-default-app-settings")?.addEventListener("click", () => {
+      void this.openDefaultPdfSettings("#default-app-error");
+    });
+    this.optional<HTMLButtonElement>("#default-pdf-open-settings")?.addEventListener("click", () => {
+      void this.openDefaultPdfSettings("#default-pdf-error", "#default-pdf-dialog");
+    });
+    this.optional<HTMLButtonElement>("#default-pdf-later")?.addEventListener("click", () => {
+      this.closeDialog(this.optional<HTMLDialogElement>("#default-pdf-dialog"));
+    });
+    this.optional<HTMLInputElement>("#default-pdf-dont-ask")?.addEventListener("change", (event) => {
+      if (!(event.currentTarget as HTMLInputElement).checked) return;
+      if (startupPrompt) startupPrompt.checked = false;
+      try { storage?.setItem(DEFAULT_PDF_STARTUP_PROMPT_KEY, "false"); } catch { /* The prompt can still be dismissed. */ }
+    });
+
+    let firstRun = true;
+    try { firstRun = storage?.getItem(DEFAULT_PDF_FIRST_RUN_SEEN_KEY) !== "true"; } catch { /* Treat unavailable storage as a first run. */ }
+    try { if (firstRun) storage?.setItem(DEFAULT_PDF_FIRST_RUN_SEEN_KEY, "true"); } catch { /* The first-run dialog remains available from Options. */ }
+    if (firstRun || startupPrompt?.checked) {
+      this.appDocument().defaultView?.setTimeout(() => this.showDialog("#default-pdf-dialog"), 500);
+    }
+  }
+
+  private safeStorage(): Storage | undefined {
+    try { return this.appDocument().defaultView?.localStorage; } catch { return undefined; }
+  }
+
+  private async openDefaultPdfSettings(errorSelector: string, dialogSelector?: string): Promise<void> {
+    const errorElement = this.optional<HTMLElement>(errorSelector);
+    if (errorElement) errorElement.hidden = true;
+    try {
+      await this.bridge.invoke("open_default_pdf_settings");
+      if (dialogSelector) this.closeDialog(this.optional<HTMLDialogElement>(dialogSelector));
+    } catch (error) {
+      if (errorElement) {
+        errorElement.textContent = `Could not open Windows Default apps settings: ${errorMessage(error)}`;
+        errorElement.hidden = false;
+      }
+    }
   }
 
   private handleKeyboardShortcuts(event: KeyboardEvent): void {
@@ -714,6 +791,21 @@ export class PdfReaderUi {
       this.trimPageImageCache(this.cachePageLimit());
       if (this.current) this.scheduleNextPagePrefetch(this.pageIndex, this.current, this.generationToken);
     }
+  }
+
+  private setHighQualityRendering(enabled: boolean): void {
+    if (this.highQualityRendering === enabled) return;
+    this.highQualityRendering = enabled;
+    try {
+      this.appDocument().defaultView?.localStorage.setItem(RENDER_QUALITY_STORAGE_KEY, String(enabled));
+    } catch { /* Keep the preference for this session if storage is unavailable. */ }
+    this.cancelPrefetch();
+    this.prefetchCapacityBlocked = false;
+    for (const pageIndex of this.pageImages.keys()) {
+      if (pageIndex !== this.pageIndex) this.releasePageImage(pageIndex);
+    }
+    this.prefetchCursor = this.pageIndex + 1;
+    if (this.current) void this.showPage(this.pageIndex, false, true);
   }
 
   async close(): Promise<void> {
@@ -1174,7 +1266,8 @@ export class PdfReaderUi {
           this.activeRequestToken = requestToken;
           const dpr = Math.min(globalThis.devicePixelRatio || 1, 2);
           const cssWidth = Math.max(1, this.pageStack.clientWidth || this.viewer.clientWidth - 56 || 1000);
-          const [width, height] = targetDimensions(cssWidth * dpr, doc.page_width_points, doc.page_height_points);
+          const qualityScale = this.highQualityRendering ? 2 : 1;
+          const [width, height] = targetDimensions(cssWidth * dpr * qualityScale, doc.page_width_points, doc.page_height_points);
           try {
             buffer = await this.bridge.invoke<ArrayBuffer>("render_page", {
               requestToken, documentId: doc.document_id, generation: doc.generation,
@@ -1256,7 +1349,8 @@ export class PdfReaderUi {
     try {
       const dpr = Math.min(globalThis.devicePixelRatio || 1, 2);
       const cssWidth = Math.max(1, this.pageStack.clientWidth || this.viewer.clientWidth - 56 || 1000);
-      const [width, height] = targetDimensions(cssWidth * dpr, doc.page_width_points, doc.page_height_points);
+      const qualityScale = this.highQualityRendering ? 2 : 1;
+      const [width, height] = targetDimensions(cssWidth * dpr * qualityScale, doc.page_width_points, doc.page_height_points);
       const buffer = await this.bridge.invoke<ArrayBuffer>("render_page", {
         requestToken: task.requestToken, documentId: doc.document_id, generation: doc.generation,
         pageIndex: task.pageIndex, width, height, zoom: 1,
@@ -1503,6 +1597,7 @@ export class PdfReaderUi {
   }
   private updateControls(): void {
     const doc = this.current;
+    this.name.hidden = Boolean(doc);
     this.closeButton.disabled = !doc;
     if (this.zoomInButton) this.zoomInButton.disabled = !doc || this.zoom >= 4;
     if (this.zoomOutButton) this.zoomOutButton.disabled = !doc || this.zoom <= 0.25;
@@ -1555,6 +1650,13 @@ function readRenderMode(): RenderMode {
     const value = globalThis.localStorage?.getItem(RENDER_MODE_STORAGE_KEY);
     return value === "current" || value === "nearby" || value === "balanced" || value === "maximum" ? value : "balanced";
   } catch { return "balanced"; }
+}
+
+function readHighQualityRendering(): boolean {
+  try {
+    const value = globalThis.localStorage?.getItem(RENDER_QUALITY_STORAGE_KEY);
+    return value === null || value === undefined ? true : value !== "false";
+  } catch { return true; }
 }
 
 function readRecentPaths(): string[] {

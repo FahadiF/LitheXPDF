@@ -4,6 +4,89 @@ LitheXPDF is an early-stage Windows application. This page records reproducible
 checks and remaining validation work. A passing build does not establish full
 PDF compatibility, packaged readiness, or lower memory use.
 
+## Windows default-app integration — 2026-11-09
+
+The current working tree adds an MSI WiX fragment that registers LitheXPDF as
+a selectable PDF handler without changing the user's Windows default. The
+first-run prompt and Options controls open Default apps; the user must confirm
+the `.pdf` association. The host captures a `.pdf` startup argument so a file
+opened from Explorer can be loaded after launch.
+
+Checks for this implementation pass:
+
+| Check | Result |
+| --- | --- |
+| `pnpm typecheck` | Passed, exit 0 |
+| `pnpm build` | Passed, exit 0; Vite bundled the canonical icon from `src-tauri/icons/lithexpdf.png` without a `public/` directory |
+| `cargo check --workspace --all-targets` | Passed, exit 0 with a temporary target directory and repository access; the sandboxed attempt was blocked by Tauri context-generation access to the working directory |
+| `pnpm tauri build --bundles msi` | Passed, exit 0; local unsigned x64 MSI built under the temporary target directory. Generated WiX object contains the PDF ProgID, `.pdf` capability, `RegisteredApplications` entry, and host open command. |
+| `git diff --check` | Passed, exit 0; Git emitted configured LF-to-CRLF warnings |
+| Frontend/Rust tests | Not run in this pass |
+
+The 0.1.1 MSI was rebuilt locally with `pnpm release:msi` (exit 0) after the
+larger ICO, clearer Settings instructions, and extra Windows `Applications`
+handler registration. The worker build/staging, frontend production build,
+host release build, and WiX candle/light packaging all passed. The MSI reports
+ProductVersion `0.1.1` and contains the host, worker, PDFium DLL, third-party
+notices, and both app-capability and Open With association entries. Its
+Authenticode status is `NotSigned`.
+
+| Artifact | Size | SHA-256 |
+| --- | ---: | --- |
+| `target/release/bundle/msi/LitheXPDF_0.1.1_x64_en-US.msi` | 8,474,624 bytes | `1CBD1D040CA7A45DF2D52B84DA373FC2856A417E679A5CB2712FFC902F3104D8` |
+
+An earlier 0.1.1 candidate was installed on the developer's Windows machine;
+this rebuilt MSI has not been installed. No 0.1.1 build has been published;
+the public `v0.1.0` release was left unchanged. The user reported that the
+Options button opened Documents instead of Windows Settings; the code now
+launches the URI through `ShellExecuteW`, and the reported Windows Settings
+page confirms URI navigation works. The updated handler picker still needs
+manual testing.
+
+Explorer thumbnails are not implemented and have no toggle. A real Windows
+Shell thumbnail provider needs an architecture review so it cannot create a
+second, concurrent PDFium worker or bypass the existing worker ownership and
+memory bounds.
+
+### Follow-up findings from the local Windows installation
+
+The v0.1.1 uninstall attempt failed with Windows Installer event 11310: error
+1310 while creating `E:\Program Files\LitheXPDF\30ea91.rbf`, with system error
+1307 (`ERROR_INVALID_OWNER`). The `.rbf` path is a Windows Installer rollback
+file, not a file in the MSI's application file table. The E: volume is NTFS
+with substantial free space; the error is not evidence of a full disk. The
+exact ownership/ACL cause has not been established, so uninstall is a release
+blocker and no rollback-suppression workaround has been added. Verify uninstall
+with a verbose MSI log and on a clean Windows environment before release.
+
+The Options dialog now hides rendering and cache explanations behind
+keyboard-accessible info buttons. This UI change is build-checked but still
+needs visual review in the desktop app. The rebuilt MSI has replaced the local
+ignored artifact at the standard path; it has not been installed or published.
+
+### Windows icon, app picker, and space calculation — 2026-11-09
+
+The user's Settings screenshot is the LitheXPDF-specific Default Apps page. Its
+`.pdf` tile displays the *current* handler (SumatraPDF), not the list of
+available handlers. Clicking that tile should open the handler picker. The
+installed registry contains the machine `RegisteredApplications` capability,
+the `.pdf` capability, the LitheXPDF ProgID, and `.pdf\OpenWithProgids`; the
+additional `Applications\lithexpdf-host.exe\SupportedTypes` registration was
+absent. It has been added to the next MSI candidate to improve Windows Open
+With discoverability. The picker still needs manual confirmation after
+installing the updated package.
+
+The original PNG has visible artwork bounds 320 x 414 inside a 512 x 512
+transparent canvas. A derived Windows source scales the same artwork to 386 x
+500, preserving transparency and the original source PNG. The local Tauri CLI
+regenerated `icon.ico` with 16, 24, 32, 48, 64, and 256 pixel frames. The
+installer icon has not yet been visually checked after installation.
+
+The MSI's “Computing space requirements” phase is Windows Installer file
+costing. `CostInitialize`, `FileCost`, and `CostFinalize` are required to
+calculate install/remove disk costs and validate target volumes; they are not
+removed. The short phase remains.
+
 ## Current verification snapshot — 2026-11-09
 
 The public `v0.1.0` x64 preview exists; this snapshot concerns the current
@@ -515,3 +598,37 @@ SHA-256 `4C323371204EF24972B616B5EA808A1AD521C1CADA54FF1407DA13A1FE81D2D8`).
 The source ICO and packaged ICO SHA-256 values match. The new MSI was not
 installed in this pass, so its screens still need user visual confirmation.
 No tests were run.
+
+### LitheXPDF 0.1.1 x64 MSI rebuild — 2026-11-09
+
+The updated release notes are in `docs/RELEASE_NOTES_0.1.1.md`. The local
+release build was run with `pnpm release:msi` and completed with exit code 0.
+The Windows x64 worker build and staging, frontend typecheck/production build,
+host release build, and WiX MSI packaging all completed successfully. The
+resulting MSI is `target/release/bundle/msi/LitheXPDF_0.1.1_x64_en-US.msi`
+(8,486,912 bytes; SHA-256
+`C941C27006EBE3DAE2BE424F43BCB3D39D32D293CDCE4B158E1543EE60EC7550`). Its
+Authenticode status is `NotSigned`.
+
+`git diff --check` completed with exit code 0 and emitted the repository's
+configured LF-to-CRLF warnings. The MSI was not installed or tested in this
+pass, no test suites were run, and no release was published. Clean-machine
+installation/uninstallation, PDF association behavior, printing, and visual
+comparison of the new Quality rendering setting remain manual checks.
+
+### Render-density quality option — 2026-11-09
+
+The reader now defaults to a persisted Quality preference that requests up to
+2× the prior WebView display-density dimensions. Options includes a checkbox
+to disable the multiplier for Speed. Changing the preference clears other
+cached page images and rerenders the current page; the existing worker limits
+on bitmap dimensions, pixel count, RGBA memory, and encoded PNG size remain in
+force. Quality may increase render time and reduce how many pages fit in the
+existing image-cache byte limits. This change has not yet been visually
+compared with SumatraPDF, and no performance or memory improvement is claimed.
+
+`pnpm build` is the required frontend verification for this change. No Rust
+renderer code or protocol was changed. Manual verification should compare the
+same text-heavy PDF at 100%, 150%, and 200% in Quality and Speed modes and
+check that changing modes rerenders the current page without showing a stale
+image. Installer behavior and packaged rendering remain unverified.

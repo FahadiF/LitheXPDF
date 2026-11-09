@@ -128,6 +128,27 @@ target-triple-named sidecar configuration is unchanged. The mapping and code
 compile, but packaged resource lookup and clean-machine execution remain
 unverified.
 
+## Windows default-PDF integration
+
+The Windows MSI registers a LitheXPDF PDF ProgID, `RegisteredApplications`
+capabilities, and an `Applications\lithexpdf-host.exe\SupportedTypes` entry
+so Windows can list LitheXPDF as a user-selectable PDF app. The
+installer must not change the user's current default. The first-run prompt and
+Options action launch the registered-app Default Apps page through the Windows
+Shell URI handler; the user confirms the `.pdf` association there. A PDF path
+passed to the app at process startup is
+forwarded to the existing single worker after the WebView is ready. The
+settings checkbox controls whether the app repeats its reminder at each
+startup; it does not claim to report or change Windows' selected default.
+
+Explorer PDF thumbnails are not implemented. A Windows Shell thumbnail
+provider runs outside the reader UI and cannot load PDFium directly without
+creating a second native-PDF execution path. Do not add a nonfunctional
+checkbox or a provider that bypasses the single-worker/single-document
+boundary. Revisit this feature only with a separately reviewed design for
+serialized thumbnail requests, worker lifetime, Shell process isolation,
+cancellation, cache limits, and installation/uninstallation cleanup.
+
 **Dependency selection:** only `crates/pdfium-worker` declares
 `pdfium-render =0.9.4`, with `default-features = false` and explicit features
 `pdfium_7881`, `image_025`, and `thread_safe`; direct `image =0.25.10` enables
