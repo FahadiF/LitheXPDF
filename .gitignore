@@ -5,6 +5,8 @@
 /src-tauri/gen/
 /src-tauri/binaries/pdfium-worker-*.exe
 /docs/dev
+/proposals/
+/public/
 *.pdfium-tmp
 
 
