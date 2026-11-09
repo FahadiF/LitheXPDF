@@ -29,6 +29,7 @@
   },
   "bundle": {
     "active": true,
+    "publisher": "Fahad Ibne Fahian",
     "externalBin": ["binaries/pdfium-worker"],
     "resources": {
       "resources/pdfium/pdfium.dll": "pdfium/pdfium.dll",

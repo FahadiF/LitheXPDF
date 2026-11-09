@@ -140,7 +140,47 @@ describe("reader image lifecycle", () => {
     await ui.close();
   });
 
-  it("prefetches one page after one second of idle time and reuses its bounded encoded response", async () => {
+  it("keeps the previous image through a distant page jump until the new image decodes", async () => {
+    let releaseRender!: (value: ArrayBuffer) => void;
+    let urls = 0;
+    const revoked: string[] = [];
+    const bridge: ReaderBridge = {
+      pickPdf: async () => null,
+      invoke: vi.fn(async (command: string, args?: Record<string, unknown>) => {
+        if (command === "open_pdf") return { document_id: id, generation: 7, page_count: 8, page_width_points: 612, page_height_points: 792 } as never;
+        if (command === "render_page" && args?.pageIndex === 7) return await new Promise<ArrayBuffer>((resolve) => { releaseRender = resolve; }) as never;
+        if (command === "render_page") return pageFrame(Number(args?.pageIndex ?? 0)) as never;
+        return undefined as never;
+      }),
+      createObjectURL: (blob) => `blob:distant-${++urls}-${blob.size}`,
+      revokeObjectURL: (url) => revoked.push(url),
+    };
+    const ui = new PdfReaderUi(document, bridge);
+    await ui.open("C:\\distant-jump.pdf");
+    const originalImage = document.querySelector<HTMLImageElement>("#page-image")!;
+    originalImage.dispatchEvent(new Event("load"));
+    const pageInput = document.querySelector<HTMLInputElement>("#page-number")!;
+    pageInput.value = "8";
+    pageInput.dispatchEvent(new Event("change"));
+    await Promise.resolve();
+
+    expect(originalImage.isConnected).toBe(true);
+    expect(originalImage.hasAttribute("src")).toBe(true);
+    expect(revoked).toHaveLength(0);
+
+    releaseRender(pageFrame(7));
+    await Promise.resolve();
+    await Promise.resolve();
+    const replacement = document.querySelector<HTMLImageElement>("#page-image")!;
+    expect(replacement.dataset.pageIndex).toBe("7");
+    expect(originalImage.isConnected).toBe(true);
+    replacement.dispatchEvent(new Event("load"));
+    expect(originalImage.isConnected).toBe(false);
+    expect(revoked).toHaveLength(1);
+    await ui.close();
+  });
+
+  it("warms nearby page images shortly after opening and reuses them during navigation", async () => {
     vi.useFakeTimers();
     const calls: number[] = [];
     let urls = 0;
@@ -161,17 +201,54 @@ describe("reader image lifecycle", () => {
     try {
       const ui = new PdfReaderUi(document, bridge);
       await ui.open("C:\\prefetch.pdf");
-      await vi.advanceTimersByTimeAsync(999);
+      await vi.advanceTimersByTimeAsync(249);
       expect(calls).toEqual([0]);
       await vi.advanceTimersByTimeAsync(1);
       expect(calls).toEqual([0, 1]);
-      expect(urls).toBe(1);
+      expect(urls).toBe(2);
+      expect(document.querySelector('.page-image[data-page-index="1"]')?.getAttribute("src")).toBe("blob:prefetch-2");
+      await vi.advanceTimersByTimeAsync(16);
+      expect(calls).toEqual([0, 1, 2]);
+      expect(urls).toBe(3);
       document.querySelector<HTMLButtonElement>("#next-button")!.click();
       await Promise.resolve();
       await Promise.resolve();
-      expect(calls).toEqual([0, 1]);
-      expect(urls).toBe(2);
+      expect(calls).toEqual([0, 1, 2]);
+      expect(urls).toBe(3);
       await ui.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops prefetching when the decoded-image budget cannot hold another page", async () => {
+    vi.useFakeTimers();
+    const calls: number[] = [];
+    const revoked: string[] = [];
+    let urls = 0;
+    const bridge: ReaderBridge = {
+      pickPdf: async () => null,
+      invoke: vi.fn(async (command: string, args?: Record<string, unknown>) => {
+        if (command === "open_pdf") return { document_id: id, generation: 7, page_count: 20, page_width_points: 612, page_height_points: 792 } as never;
+        if (command === "render_page") {
+          const pageIndex = Number(args?.pageIndex ?? 0);
+          calls.push(pageIndex);
+          return pageFrame(pageIndex, 7, [0x89, 0x50, 0x4e, 0x47], id, 4096, 2048) as never;
+        }
+        return undefined as never;
+      }),
+      createObjectURL: () => `blob:large-${++urls}`,
+      revokeObjectURL: (url) => revoked.push(url),
+    };
+    try {
+      const ui = new PdfReaderUi(document, bridge);
+      await ui.open("C:\\large-pages.pdf");
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(calls).toEqual([0, 1, 2]);
+      expect(document.querySelectorAll(".page-image")).toHaveLength(2);
+      expect(revoked).toContain("blob:large-3");
+      await ui.close();
+      expect(revoked).toHaveLength(3);
     } finally {
       vi.useRealTimers();
     }
@@ -200,7 +277,7 @@ describe("reader image lifecycle", () => {
     try {
       const ui = new PdfReaderUi(document, bridge);
       await ui.open("C:\\stale-prefetch.pdf");
-      await vi.advanceTimersByTimeAsync(1_000);
+      await vi.advanceTimersByTimeAsync(250);
       expect(calls).toEqual([0, 1]);
 
       const next = document.querySelector<HTMLButtonElement>("#next-button")!;
@@ -240,7 +317,7 @@ describe("reader image lifecycle", () => {
       const ui = new PdfReaderUi(document, bridge);
       await ui.open("C:\\close-prefetch.pdf");
       await ui.close();
-      await vi.advanceTimersByTimeAsync(1_000);
+      await vi.advanceTimersByTimeAsync(250);
       expect(calls).toEqual([0]);
     } finally {
       vi.useRealTimers();
@@ -299,7 +376,7 @@ describe("reader image lifecycle", () => {
     }
   });
 
-  it("navigates past five pages while retaining one shared image and revoking replaced URLs", async () => {
+  it("navigates past five pages with a bounded decoded-image window and releases all URLs on close", async () => {
     const revoked: string[] = [];
     let urls = 0;
     const bridge: ReaderBridge = {
@@ -314,25 +391,61 @@ describe("reader image lifecycle", () => {
     };
     const ui = new PdfReaderUi(document, bridge);
     await ui.open("C:\\long.pdf");
-    const image = document.querySelector<HTMLImageElement>("#page-image")!;
     const next = document.querySelector<HTMLButtonElement>("#next-button")!;
 
     expect(document.querySelectorAll(".page-slot")).toHaveLength(7);
-    expect(image.closest<HTMLElement>(".page-slot")?.dataset.pageIndex).toBe("0");
+    expect(document.querySelector<HTMLImageElement>("#page-image")?.closest<HTMLElement>(".page-slot")?.dataset.pageIndex).toBe("0");
     for (let pageIndex = 1; pageIndex < 7; pageIndex++) {
       next.click();
       expect(document.querySelector<HTMLInputElement>("#page-number")?.value).toBe(String(pageIndex + 1));
       expect(document.querySelector("#page-total")?.textContent).toBe("/ 7");
       await Promise.resolve();
-      expect(document.querySelectorAll("img")).toHaveLength(1);
-      expect(image.closest<HTMLElement>(".page-slot")?.dataset.pageIndex).toBe(String(pageIndex));
+      const activeImage = document.querySelector<HTMLImageElement>("#page-image");
+      expect(activeImage?.closest<HTMLElement>(".page-slot")?.dataset.pageIndex).toBe(String(pageIndex));
+      expect(document.querySelectorAll(".page-image").length).toBeLessThanOrEqual(3);
     }
     expect(next.disabled).toBe(true);
-    expect(revoked).toHaveLength(6);
+    expect(revoked.length).toBeGreaterThan(0);
     await ui.close();
     expect(revoked).toHaveLength(7);
-    expect(image.hasAttribute("src")).toBe(false);
+    expect(document.querySelectorAll(".page-image")).toHaveLength(0);
     expect(document.querySelectorAll(".page-slot")).toHaveLength(0);
+  });
+
+  it("keeps object URLs bounded while visiting fifty pages", async () => {
+    vi.useFakeTimers();
+    const revoked: string[] = [];
+    let urls = 0;
+    const bridge: ReaderBridge = {
+      pickPdf: async () => null,
+      invoke: vi.fn(async (command: string, args?: Record<string, unknown>) => {
+        if (command === "open_pdf") return { document_id: id, generation: 7, page_count: 50, page_width_points: 612, page_height_points: 792 } as never;
+        if (command === "render_page") return pageFrame(Number(args?.pageIndex ?? 0)) as never;
+        return undefined as never;
+      }),
+      createObjectURL: () => `blob:fifty-${++urls}`,
+      revokeObjectURL: (url) => revoked.push(url),
+    };
+    try {
+      const ui = new PdfReaderUi(document, bridge);
+      await ui.open("C:\\fifty-pages.pdf");
+      const next = document.querySelector<HTMLButtonElement>("#next-button")!;
+      for (let pageIndex = 1; pageIndex < 50; pageIndex++) {
+        next.click();
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      }
+      expect(document.querySelector<HTMLInputElement>("#page-number")?.value).toBe("50");
+      expect(document.querySelectorAll(".page-image").length).toBeLessThanOrEqual(3);
+      expect(urls).toBe(50);
+      expect(revoked.length).toBeGreaterThanOrEqual(47);
+      await ui.close();
+      expect(revoked).toHaveLength(50);
+      expect(document.querySelectorAll(".page-image")).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("fits mixed page dimensions without stretching the shared image", async () => {
@@ -351,7 +464,7 @@ describe("reader image lifecycle", () => {
     const image = document.querySelector<HTMLImageElement>("#page-image")!;
     const slot = image.closest<HTMLElement>(".page-slot");
     expect(slot?.style.aspectRatio).toBe("300 / 600");
-    expect(stylesheet).toMatch(/#page-image\s*\{[^}]*width:\s*100%[^}]*height:\s*auto/s);
+    expect(stylesheet).toMatch(/\.page-image\s*\{[^}]*width:\s*100%[^}]*height:\s*auto/s);
     await ui.close();
   });
 

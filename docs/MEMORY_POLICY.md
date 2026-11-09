@@ -11,13 +11,12 @@ budgets to test, not evidence that memory use has already improved.
 - One child process owns the one active PDFium document and all PDFium objects.
 - At most one render executes at a time. A render bitmap is dropped after
   encoding and response transmission.
-- The frontend retains one visible decoded image and encoded page responses
-  for the active document only. The selected look-ahead limit is 0, 3, 12, or
-  30 pages, bounded by a 64 MiB total encoded-response cap.
-  The cache contains only validated binary render envelopes; it creates no
-  image elements or object URLs. Opening/replacing/closing a document clears
-  all encoded entries, clears image sources/references, and revokes its object
-  URL. No inactive document has encoded or decoded page images.
+- The frontend retains page image elements and Blob object URLs for the active
+  document only. It keeps at most 30 pages, with separate 64 MiB caps for
+  encoded PNG bytes and estimated decoded RGBA bytes. The image cache stores
+  no response ArrayBuffers. Opening/replacing/closing a document clears image
+  sources and element references and revokes every object URL. No inactive
+  document has encoded or decoded page images.
 - Document close is required for releasing document-owned native objects.
   It is not evidence that the Windows working set immediately falls; report
   process private bytes and working set separately.
@@ -39,8 +38,8 @@ must be tuned using the benchmark corpus:
 | Maximum width or height | 8,192 px | Reject request or downscale while preserving aspect ratio |
 | Maximum RGBA bitmap bytes | 32 MiB | Enforce before allocating/rendering where possible |
 | Maximum encoded image payload | 32 MiB | Abort bounded writer; return `IMAGE_TOO_LARGE`, never send partial bytes |
-| Frontend encoded page-response cache | 64 MiB and at most 30 pages; selected look-ahead is 0, 3, 12, or 30 pages | Cache validated responses for the active document only; never cache an individual response above the 32 MiB image protocol cap; evict the farthest cached page when either cap is reached; clear on document change/close and when preloading is disabled |
-| Decoded WebView images | 1 page, at most 32 MiB RGBA dimensions | Clear `src`, remove element/references, revoke URL on replacement/deactivation |
+| Active-document encoded PNG image cache | 64 MiB and at most 30 page images; mode windows are 0, 3, 12 (default), or up to 30 pages ahead, with a 30-image total cap | Cache only validated responses as Blob URLs; never cache an individual image above the 32 MiB protocol cap; evict the farthest inactive page when either byte cap or page count is exceeded; clear on document change/close and when preloading is disabled |
+| Decoded WebView images | 64 MiB estimated RGBA bytes and at most 30 page images | Estimate each image as width × height × 4; evict farthest inactive images when limits are reached; clear `src`, remove element/references, and revoke URL on eviction/deactivation |
 | IPC control/request payload | 64 KiB per frame | Reject before allocation |
 | IPC image-result payload | 32 MiB image bytes + at most 4 KiB metadata | Reject malformed/oversized frame and restart worker |
 | Search query payload | 512 UTF-8 bytes plus fixed request metadata | Reject before dispatch |
@@ -94,13 +93,14 @@ measurements exist and are reported with their limits.
 
 ## Current tabbed UI accounting
 
-The tabbed view creates one lightweight DOM slot per page in the active document and reuses one decoded <img> element for the page nearest the viewport. The frontend keeps at most 100 tab records; each inactive record retains only a tab ID, path, page index, zoom, and scroll offsets. No inactive tab retains document/page objects, encoded frames, decoded images, or object URLs. The new recommended mode keeps up to 12 future page responses for the active document; Light keeps 3, Maximum keeps up to 30, and No preloading clears the cache. Prefetch starts one second after the initial page or a mode change; user navigation and successful prefetches continue filling the window with short gaps. All modes share a 64 MiB encoded-response cap. The page count target can be cut short when that byte cap is reached. The cache follows the active page and removes pages behind it; switching documents clears all entries. On a page change, the prior image remains assigned until the replacement response is validated; its URL is then revoked. Closing/switching a tab closes the native document before opening another and clears active cache/image state. The page-slot DOM grows with page count and is not yet virtualized. The raw IPC response and the frontend's copied PNG bytes/Blob can overlap temporarily during image handoff; this transient peak has not been measured. These implementation details are not evidence of a memory improvement or a total-process memory bound.
+The tabbed view creates one lightweight DOM slot per page in the active document to preserve the full scroll extent. The frontend keeps at most 100 tab records; each inactive record retains only a tab ID, path, page index, zoom, and scroll offsets. No inactive tab retains document/page objects, encoded images, decoded images, or object URLs. Recommended mode pre-renders up to 12 pages ahead after a 250 ms warm-up; Light uses 3, Maximum targets up to 30, and On demand disables preloading. Successful renders are installed as page `<img>` elements in their real slots. The rolling cache keeps up to two previous pages and is limited to 30 images, 64 MiB encoded PNG bytes, and 64 MiB estimated decoded RGBA bytes. Either byte cap can shorten the selected window. After each successful prefetch it waits 16 ms before scheduling another serial render. Switching documents clears active image state; tabs remain metadata-only. The page-slot DOM grows with page count and is not yet virtualized. The raw IPC response, copied PNG bytes, Blob storage, decoded WebView image, and PDFium/encoder buffers can overlap temporarily; this transient peak has not been measured. These accounting limits do not bound total process/GPU memory and are not evidence of a memory improvement.
 
 The five-slot DOM experiment was reverted after it truncated navigation and
-did not provide a bounded object-URL lifecycle. The current one-image design
-remains the active implementation. Any future virtualization work must retain
-the full scroll extent and prove bounded image cleanup with tests; it must not
-be described as a memory improvement until measured.
+did not provide a bounded object-URL lifecycle. The current implementation
+keeps full-document scroll geometry and a rolling page-image cache. Any future
+virtualization work must retain the full scroll extent and prove bounded image
+cleanup with tests; it must not be described as a memory improvement until
+measured.
 
 Text search runs serially in the PDFium worker and returns at most 250 result
 rows. The query is capped at 512 UTF-8 bytes and each excerpt at 128 UTF-8
@@ -113,25 +113,24 @@ localStorage metadata; they never retain rendered images or PDF contents.
 
 ## Bounded next-page prefetch — 2026-11-08
 
-After the initial page or a mode change, the frontend waits 1,000 ms before
-prefetch starts. After a user page change or a successful prefetch, it fills a
-selected forward look-ahead window serially with a 40 ms delay between
-responses. The choices are 0, 3, 12 (default), or up to 30 pages. A prefetched
-frame is validated before being cached. The
-cache is limited to 30 encoded responses and 64 MiB total; a response above
-the 32 MiB image protocol cap cannot be cached. At the byte cap, the farthest
-cached page is evicted. No preloaded page images are retained for inactive
-tabs. A queued prefetch is cancelled when the user navigates elsewhere or
-closes/replaces the document. If the user selects the page currently being
-prefetched, that request is promoted and reused. Choosing 0 clears cached
-responses. At most one decoded <img> and its object URL are retained, and the
-centered loading indicator is reserved for the initial open; page transitions
-keep it hidden and replace the image only after the new validated response
-arrives.
+After the initial page is installed, the frontend waits 250 ms before
+preloading starts. The choices are On demand (0 future pages), Light (3),
+Recommended (12, default), and Maximum (up to 30). Successful prefetches are
+serial, with a 16 ms scheduling gap. The cache retains at most 30 image
+elements and enforces independent 64 MiB encoded-PNG and estimated decoded-RGBA
+budgets; each response is still capped at 32 MiB by the protocol. It retains
+up to two pages behind the current page, then evicts the farthest inactive page
+when a cap is reached. A queued prefetch is cancelled on navigation or
+document close; a matching in-flight render can be promoted to the visible
+page. No preloaded images are retained for inactive tabs. Choosing On demand
+clears every non-current image. The centered loader remains reserved for
+initial open; page transitions keep it hidden and preserve the old image until
+the next validated image is available.
 
-The 1,000 ms start delay, continuation delay and cache caps are initial test
-targets, not measured performance or memory improvements. Full-document eager
-image retention is not used.
+These time and byte limits are implementation settings, not measured speed or
+memory improvements. The view provides a full-document scrolling surface, but
+does not eagerly render every page or promise zero wait outside the warmed
+window. Full-document eager image retention is not used.
 
 
 The recent-files menu stores at most ten full local paths in WebView local storage because this is required to reopen recent documents. This is local profile data, not encrypted. It does not store PDF contents or page images.

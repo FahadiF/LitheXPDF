@@ -89,7 +89,7 @@
                 <span class="menu-icon" aria-hidden="true">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
                 </span>
-                <span class="menu-label">Print current page…</span>
+                <span class="menu-label">Print…</span>
                 <kbd class="menu-shortcut">Ctrl+P</kbd>
               </button>
 
@@ -161,7 +161,7 @@
             <button id="rotate-right-button" class="button button-square rotate-button" type="button" aria-label="Rotate pages right" title="Rotate pages right" disabled>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4L21 8"></path><path d="M21 3v5h-5"></path></svg>
             </button>
-            <button id="print-button" class="button" type="button" title="Print current page (Ctrl+P)" disabled>
+            <button id="print-button" class="button" type="button" title="Print document (Ctrl+P)" disabled>
               <span class="button-icon-lead" aria-hidden="true">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
               </span>
@@ -304,22 +304,22 @@
         <legend>Page rendering</legend>
         <label class="render-choice">
           <input type="radio" name="render-mode" value="current" />
-          <span><strong>No preloading</strong><small>Uses the least background CPU and encoded cache. A page starts rendering when you navigate to it.</small></span>
+          <span><strong>On demand</strong><small>Renders the page you reach. Nearby rendered pages are released, so scrolling can pause while a new page is prepared.</small></span>
         </label>
         <label class="render-choice">
           <input type="radio" name="render-mode" value="nearby" />
-          <span><strong>Light · up to 3 pages ahead</strong><small>Lower memory use. Starts after one second, then keeps nearby pages ready as you move through the document.</small></span>
+          <span><strong>Light · 3 pages ahead</strong><small>Starts shortly after the first page appears and keeps a small decoded window around your position.</small></span>
         </label>
         <label class="render-choice">
           <input type="radio" name="render-mode" value="balanced" />
-          <span><strong>Recommended · up to 12 pages ahead</strong><small>Default. Starts after one second, then keeps filling the active document's look-ahead window as you scroll.</small></span>
+          <span><strong>Recommended · 12 pages ahead</strong><small>Default. Begins in the background shortly after opening, then keeps nearby pages ready as you scroll.</small></span>
         </label>
         <label class="render-choice">
           <input type="radio" name="render-mode" value="maximum" />
-          <span><strong>Maximum · up to 30 pages ahead</strong><small>Highest background CPU and cache use. Short documents may fit entirely; long documents use a rolling window and prepare more as you move through them.</small></span>
+          <span><strong>Maximum · up to 30 cached pages</strong><small>Highest background CPU and cache use. It fills a rolling window; it does not render every page of a long document at once.</small></span>
         </label>
       </fieldset>
-      <p class="dialog-note">The encoded page cache is capped at 64 MiB and 30 pages. Only the active document is preloaded; inactive tabs keep metadata only and render after you switch to them. Changing to No preloading clears existing prefetched pages. Higher settings use more background CPU and can use more memory; these limits are initial targets, not measured savings.</p>
+      <p class="dialog-note">Only the active document is prepared; background tabs keep metadata only. The rolling cache is capped at 64 MiB of encoded page data, 64 MiB of estimated decoded pixels, and 30 page images. Larger budgets use more background CPU and memory. These are enforced limits and estimates, not measured system-memory savings.</p>
       <div class="dialog-actions"><button class="button button-primary" type="button" data-dialog-close>Done</button></div>
     </dialog>
 
@@ -395,7 +395,7 @@
         <li><strong>Rotate:</strong> Use the rotate buttons to change the active tab’s viewing angle. Rotation is saved with the tab and does not modify the PDF; printing keeps the file’s original orientation.</li>
         <li><strong>Find in Document:</strong> Search text across the PDF. Scanned pages without a text layer are not searchable.</li>
         <li><strong>Tabs:</strong> Only one document is open in the native PDF renderer at a time. Background tabs retain their path and view state.</li>
-        <li><strong>Print:</strong> <kbd>Ctrl</kbd> + <kbd>P</kbd> prints the current rendered page.</li>
+        <li><strong>Print:</strong> <kbd>Ctrl</kbd> + <kbd>P</kbd> opens the Windows print settings. Choose Current page, All pages, or a page range, then select a printer, paper size, orientation, and printer properties.</li>
         <li><strong>Help:</strong> Press <kbd>F1</kbd> to open this guide.</li>
       </ul>
       <div class="dialog-actions"><button class="button button-primary" type="button" data-dialog-close>Done</button></div>

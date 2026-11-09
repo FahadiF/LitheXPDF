@@ -24,10 +24,12 @@ pub enum Kind {
     Close = 0x0003,
     Shutdown = 0x0004,
     Search = 0x0005,
+    Print = 0x0006,
     Ready = 0x8001,
     Ack = 0x8002,
     Page = 0x8003,
     SearchResults = 0x8004,
+    PrintResult = 0x8005,
     Error = 0x80ff,
 }
 
@@ -40,10 +42,12 @@ impl TryFrom<u16> for Kind {
             0x0003 => Ok(Self::Close),
             0x0004 => Ok(Self::Shutdown),
             0x0005 => Ok(Self::Search),
+            0x0006 => Ok(Self::Print),
             0x8001 => Ok(Self::Ready),
             0x8002 => Ok(Self::Ack),
             0x8003 => Ok(Self::Page),
             0x8004 => Ok(Self::SearchResults),
+            0x8005 => Ok(Self::PrintResult),
             0x80ff => Ok(Self::Error),
             _ => Err(ProtocolError::UnknownKind(value)),
         }

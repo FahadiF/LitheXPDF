@@ -5,8 +5,8 @@
 The current UI supports a tab strip and native multi-file picker. It keeps
 lightweight path and view-position state for up to 100 tabs while the host
 supervises exactly one active PDFium document. It includes page navigation,
-per-tab zoom, rendering-mode settings, recent files, current-page printing,
-bookmarks, search, and theme controls. The worker protocol codec is shared in
+per-tab zoom, rendering-mode settings, recent files, Windows current/all/range
+printing, bookmarks, search, and theme controls. The worker protocol codec is shared in
 `crates/pdfium-protocol`; only the worker links `pdfium-render`. UI/manual
 WebView2 and packaged-install validation status is tracked in `docs/TESTING.md`.
 
@@ -229,13 +229,15 @@ On normal tab deactivation, the host increments the generation, discards its
 pending queue, and stops dispatching new requests before sending close. It
 cannot cancel a render already executing inside PDFium: it waits for that one
 reply asynchronously, discards it as stale, then sends close. The worker drops
-the document and acknowledges close. On application shutdown, stop accepting work, invalidate generations,
-send a framed shutdown message, and asynchronously await the worker's shutdown
-acknowledgement and process-exit event for the 2-second grace period. If it
-does not exit, request termination from the supervisor I/O task, asynchronously
-await/reap process exit, and only
-then complete app exit. Use Tauri's exit-request prevention to defer exit
-while cleanup runs. Never block the GUI thread during shutdown.
+the document and acknowledges close. On application shutdown, stop accepting
+work, invalidate generations, send a framed shutdown message, and asynchronously
+await the worker's shutdown acknowledgement and process-exit event for the
+2-second grace period. If a native print dialog or another operation still
+owns the operation lock after that grace, terminate the worker through the
+supervisor's blocking process task and await exit/reap before completing app
+exit. If a framed shutdown has already been sent, its 2-second acknowledgement
+grace remains separate. Use Tauri's exit-request prevention to defer exit while
+cleanup runs. Never block the GUI thread during shutdown.
 
 On worker crash or protocol failure, the host fails all outstanding request
 channels, clears the active document state on the next supervisor transition,
@@ -292,33 +294,31 @@ and a separately reviewed architecture decision.
 
 ## Continuous page view — 2026-11-08
 
-The tabbed reader presents one lightweight DOM slot per page so the
-full document retains a scroll extent. It requests a bounded full-page render
-for the page nearest the viewport after a short scroll debounce; it does not
-eagerly render every page. One shared image element is moved to the selected
-slot, and page navigation scrolls that slot into view. The host supplies a
-maximum render box; the worker fits the actual page dimensions within that box
-while preserving aspect ratio and the existing pixel/dimension caps. After the
-initial page or a changed setting, the frontend waits one second before
-prefetching. After user navigation or a successful prefetch, it continues after
-a 40 ms gap, serially filling the selected window: 0 pages, 3 pages, 12 pages
-by default, or up to 30 pages. It retains at most 64 MiB of validated encoded
-responses for the active document. Selecting no preloading clears the cache;
-changing modes trims it to the new limit. The worker still renders one page at
-a time.
-The active viewport stays the render priority: navigation cancels queued
-prefetch work and promotes an already-running matching page request. Inactive
-tabs retain metadata only and are rendered after activation; no page images are
-kept for background tabs. The cache has explicit limits but the new 64 MiB
-target is not a measured memory result. It keeps one decoded image/object URL,
-clears prefetch state on document replacement or close, and cancels queued
-prefetch work when navigation changes. Page transitions do not display the
-centered initial-open loader and keep the prior image until the replacement
-response is validated. This remains full-page rendering with one active image;
-eager whole-document retention, tiles, parallel renderers, and multiple live
-documents are not part of this change. A five-slot DOM
-experiment was reverted because it cut off full-document navigation. Runtime
-UI verification and memory measurement remain pending.
+The tabbed reader presents one lightweight DOM slot per page so the full
+document retains a scroll extent. It requests a bounded full-page render for
+the page nearest the viewport after a short scroll debounce. The default
+Recommended mode also pre-renders up to 12 pages ahead, starting 250 ms after
+the first image is installed; Light pre-renders 3 pages ahead, Maximum targets
+up to 30, and On demand disables look-ahead. Successful renders are installed
+as image elements in their real page slots, allowing warmed pages to appear in
+the continuous scroll view without another render request. The cache keeps up
+to two previous pages and is capped at 30 images, 64 MiB encoded PNG data, and
+64 MiB estimated decoded RGBA data. Either byte cap can shorten the selected
+window. Prefetch remains serial with a 16 ms scheduling gap; the worker renders
+one page at a time.
+
+Navigation cancels queued prefetch work and promotes a matching in-flight
+render. A PDFium call already running cannot be preempted, so a visible request
+may wait for it to finish. Inactive tabs retain metadata only, with no page
+images or object URLs. Selecting On demand clears non-current images;
+document replacement and close clear all image sources, element references,
+and object URLs. The centered loader is used for initial open, and page
+transitions retain the previous image until the next validated image is
+available. This remains bounded full-page rendering; it does not pre-render or
+retain every page of a long PDF. No speed or memory improvement is claimed
+without benchmarks. The five-slot DOM experiment was reverted because it cut
+off full-document navigation. Runtime UI verification and memory measurement
+remain pending.
 
 ## Reader controls and persistent preferences — 2026-11-08
 
@@ -352,3 +352,31 @@ preference, worker search framing and fixture results, malformed search
 metadata, and stale document results. The desktop WebView2 appearance and
 manual feature behavior remain to be confirmed. No memory or performance
 improvement is claimed.
+
+## Native Windows printing — 2026-11-09
+
+Printing is a Windows-only worker operation. The asynchronous Tauri `print_pdf`
+command supplies the current document identity, generation, page index, and
+owner window handle to the host. The host validates the active generation and
+sends one bounded `PRINT` frame. The worker displays the native Windows print
+property sheet with the current page selected initially. Users can choose the
+current page, all pages, or up to 16 page ranges; select an installed printer;
+and open printer-specific settings for paper size, orientation, and other
+driver-supported options. Those options vary by printer and driver.
+
+After confirmation, the worker renders each selected page on its sole PDFium
+owner thread and transfers it directly to the selected printer DC through
+GDI. It renders one bounded bitmap at a time, using the existing 8,192-pixel
+dimension, 8,388,608-pixel, and 32 MiB RGBA limits. A job is limited to 10,000
+pages. Page images are not sent through the frontend or returned over IPC;
+`PRINT_RESULT` contains only document identity, cancellation status, and the
+number of pages sent to the printer. A print request is serialized with other
+PDFium operations and does not use the render timeout because its native dialog
+waits for user input. If app exit is requested while that operation is still
+active, shutdown waits asynchronously for the operation lock for up to the
+separate 2-second shutdown grace, then terminates and reaps the worker.
+
+Compilation verifies the host and worker call path, but printer selection,
+page ranges, paper settings, printer output, and shutdown during printing still
+require manual Windows desktop verification. No print reliability,
+performance, or memory improvement is claimed before those checks.

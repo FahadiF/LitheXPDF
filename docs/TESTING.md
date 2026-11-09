@@ -278,3 +278,112 @@ memory or speed improvements. Checks run for this change:
 
 Verify idle warm-up, normal scrolling, a jump past the cache window, switching
 tabs, and No preloading after a prior mode has filled the cache.
+
+
+### Rolling page-image cache and Windows MSI candidate — 2026-11-09
+
+The active implementation now keeps full-document scroll geometry and places
+validated page images in their own page slots. Recommended mode is the default:
+it starts warming up to 12 following pages 250 ms after the first image is
+installed, then continues serially with a 16 ms scheduling gap. The rolling
+cache is limited to 30 page images, 64 MiB of encoded PNG bytes, and 64 MiB of
+estimated decoded RGBA bytes; it keeps at most two previous pages. If a page
+cannot fit in the decoded budget, background prefetch stops until navigation
+or a settings change instead of repeatedly rendering pages that are evicted.
+These are cache limits and tested lifecycle behavior, not measured memory or
+speed improvements. Pages outside the warmed window can still need rendering.
+
+Automated checks:
+
+| Command | Result |
+| --- | --- |
+| `pnpm --version` | Passed; 11.25.0 |
+| `pnpm typecheck` | Passed, exit 0 |
+| `pnpm test` | Passed, 23 frontend tests, exit 0 |
+| `pnpm build` | Passed, exit 0 |
+| `cargo check --workspace --all-targets` | Passed, exit 0 with a temporary Cargo target directory and reviewed repository access |
+| `cargo test --workspace` | Passed, 34 Rust tests, exit 0 with a temporary Cargo target directory and reviewed repository access |
+| `cargo build --release --target x86_64-pc-windows-msvc -p pdfium-worker` | Passed, exit 0 |
+| `node scripts/stage-worker-windows.mjs` | Passed, exit 0; staged worker SHA-256 matches the release build |
+| `pnpm release:msi` | Passed, exit 0; the complete worker/frontend/host/MSI workflow finished |
+| `git diff --check` | Passed, exit 0; Git emitted configured LF-to-CRLF warnings |
+
+The release command produced
+`target/release/bundle/msi/LitheXPDF_0.1.0_x64_en-US.msi` (8,278,016 bytes).
+Its SHA-256 is `2225f0e03c00ae18b19a71a8e5ae59c9d33a10bb3608f86a8b2215e1c8e32af7`
+(also saved beside the MSI). A read-only Windows Installer database query
+confirmed the package contains the host executable, `pdfium-worker.exe`,
+`pdfium.dll` (7,494,656 bytes), and `THIRD_PARTY_NOTICES.txt` (124,540 bytes).
+The packaged worker size matches the staged release binary. Its product name
+is LitheXPDF, version 0.1.0, and publisher Fahad Ibne Fahian. The MSI is not
+digitally signed.
+
+The MSI retains Tauri's default WebView2 `downloadBootstrapper` mode. A machine
+without the WebView2 runtime needs internet access during installation; the
+current package was not installed on a clean machine. See the [Tauri Windows
+Installer documentation](https://v2.tauri.app/distribute/windows-installer/)
+for the available WebView2 installation modes and their size/network tradeoffs.
+
+Two earlier sandbox-only attempts were denied filesystem access: Vite could
+not clean the repository's ignored `dist` output, and Cargo/Tauri could not
+read the repository working directory. The production build and package were
+then run successfully using the reviewed project command; workspace checks
+also passed with the target directory under `%TEMP%`. These sandbox errors are
+not source build failures.
+
+Not verified in this pass: launching the updated app in a desktop WebView2
+window, opening/scrolling short, long, and mixed-page-size PDFs with the new
+image cache, installing and launching the MSI, clean-machine dependencies,
+digital signing, performance baselines, or process/WebView memory measurements.
+The prior manual 115-page check predates this cache change and is not evidence
+for this implementation. Automated frontend coverage includes bounded URL
+retention over 50 pages, decoded-cache saturation, stale responses, and keeping
+the old image during a distant jump until the replacement decodes. The selected
+PDFium 157.0.8086.0 / `pdfium-render`
+0.9.4 / `pdfium_7881` pairing remains a partial-coverage compatibility gate.
+Do not publish this local MSI as a verified release until the outstanding
+desktop and installation checks are completed.
+
+### Native multi-page Windows printing — 2026-11-09
+
+The earlier notes above describing current-page-only WebView printing are
+historical and are superseded by this implementation. The toolbar, menu, and
+Ctrl+P now invoke an asynchronous Tauri command. On Windows, the host sends a
+bounded `PRINT` request to the existing worker; the worker opens the native
+print property sheet, initially selects the current page, and supports current
+page, all pages, or up to 16 page ranges. The dialog selects an installed
+printer and exposes printer-specific settings; paper size and orientation
+availability depend on that printer's driver. The worker renders selected
+pages serially, one bitmap at a time, directly to the printer DC. Jobs are
+limited to 10,000 pages and each temporary bitmap uses the renderer's existing
+dimension and 32 MiB RGBA bounds. No image is sent through the WebView.
+
+Application shutdown now waits asynchronously for an in-progress worker
+operation for up to the separate 2,000 ms grace. If a print dialog or driver
+still holds the operation lock, shutdown terminates and reaps the worker rather
+than waiting indefinitely. The PDFium call and printer driver path still need
+runtime observation on Windows.
+
+Checks actually run for this change:
+
+| Command | Result |
+| --- | --- |
+| `pnpm typecheck` | Passed, exit 0 |
+| `pnpm build` | Passed, exit 0 |
+| `cargo check --workspace --all-targets` | Passed, exit 0; the first attempt found and led to fixes for Windows bitmap helper imports, a `BI_RGB` binding type, and a host error-string conversion |
+| `cargo build --release --target x86_64-pc-windows-msvc -p pdfium-worker` | Passed, exit 0 |
+| `node scripts/stage-worker-windows.mjs` with `%TEMP%\LithexPDF-Cargo-Print` as `CARGO_TARGET_DIR` | Passed, exit 0; staged sidecar SHA-256 matches the release worker |
+| `cargo fmt --all` | Passed, exit 0 |
+| `git diff --check` | Passed, exit 0 after the documentation update |
+| `pnpm test` / `cargo test --workspace` | Not run; no tests were added or executed in this implementation pass |
+
+The native Windows dialog and printer output were not manually verified in
+this session. Before treating printing as verified, use a multi-page document
+(including the 115-page fixture if available) and test: current page, all
+pages, a range such as 3–8, selecting a printer, paper size/orientation and
+driver settings, cancelling, and closing the app while the print dialog is
+open. Microsoft Print to PDF can provide a reproducible output for checking
+the resulting page count. Also confirm the app remains responsive before the
+native modal dialog opens and reports useful errors for missing printers or
+failed print jobs. No print reliability, performance, or memory improvement
+is claimed until those checks and measurements exist.

@@ -2320,6 +2320,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+ "windows",
 ]
 
 [[package]]
@@ -2329,6 +2330,7 @@ dependencies = [
  "image",
  "pdfium-protocol",
  "pdfium-render",
+ "windows",
 ]
 
 [[package]]

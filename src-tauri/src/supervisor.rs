@@ -24,6 +24,7 @@ const RENDER_TIMEOUT_DEFAULT_MS: u64 = 30_000;
 const SHUTDOWN_GRACE: Duration = Duration::from_millis(2_000);
 const MAX_RESTARTS: u8 = 3;
 const SEARCH_TIMEOUT: Duration = Duration::from_secs(30);
+const MAX_PRINT_JOB_PAGES: u32 = 10_000;
 
 #[derive(Clone)]
 pub struct AppState(Arc<Supervisor>);
@@ -70,6 +71,12 @@ pub struct TextMatch {
 pub struct TextSearchResult {
     pub matches: Vec<TextMatch>,
     pub truncated: bool,
+}
+
+#[derive(Serialize)]
+pub struct PrintJobResult {
+    pub cancelled: bool,
+    pub pages_printed: u32,
 }
 
 struct Connection {
@@ -430,6 +437,72 @@ impl AppState {
         Ok(result)
     }
 
+    pub async fn print_document(
+        &self,
+        id: String,
+        generation: u64,
+        current_page: u32,
+        owner_window: u64,
+    ) -> Result<PrintJobResult, String> {
+        // Keep document activation stable while the worker owns the native
+        // Windows print property sheet and renders the selected pages.
+        let _operation = self.0.operation.lock().await;
+        let active = self.0.active.lock().await.clone().ok_or("No PDF is open")?;
+        if !active_document_matches(Some(&active), &id, generation) {
+            return Err("Document changed; print request is stale".into());
+        }
+        if current_page >= active.page_count || owner_window == 0 {
+            return Err("The current page or LitheXPDF window handle is invalid".into());
+        }
+
+        let mut payload = Vec::with_capacity(36);
+        payload.extend_from_slice(&active.tab);
+        payload.extend_from_slice(&generation.to_be_bytes());
+        payload.extend_from_slice(&current_page.to_be_bytes());
+        payload.extend_from_slice(&owner_window.to_be_bytes());
+        let conn = self.connection().await?;
+        let reply = match conn
+            .request_until_reply(self.request(Kind::Print, payload)?)
+            .await
+        {
+            Ok(reply) => reply,
+            Err(error) => {
+                if !conn.alive.load(Ordering::SeqCst) {
+                    self.0.active.lock().await.take();
+                }
+                return Err(error);
+            }
+        };
+        if reply.kind != Kind::PrintResult || reply.payload.len() != 29 {
+            conn.fail("malformed PRINT_RESULT response".into()).await;
+            return Err("The PDF worker returned an invalid print response".into());
+        }
+        let response_tab: [u8; 16] = reply.payload[..16]
+            .try_into()
+            .map_err(|_| "invalid print tab identifier")?;
+        let response_generation = read_u64(&reply.payload, 16).map_err(|e| e.to_string())?;
+        let status = reply.payload[24];
+        let pages_printed = read_u32(&reply.payload, 25).map_err(|e| e.to_string())?;
+        if response_tab != active.tab
+            || response_generation != generation
+            || status > 1
+            || pages_printed > MAX_PRINT_JOB_PAGES
+            || (status == 0 && pages_printed != 0)
+            || (status == 1 && pages_printed == 0)
+        {
+            conn.fail("PRINT_RESULT metadata did not match the request".into())
+                .await;
+            return Err("The PDF worker returned a stale or invalid print result".into());
+        }
+        if !active_document_matches(self.0.active.lock().await.as_ref(), &id, generation) {
+            return Err("Document changed while printing; result discarded".into());
+        }
+        Ok(PrintJobResult {
+            cancelled: status == 0,
+            pages_printed,
+        })
+    }
+
     pub async fn cancel_render(&self, request_token: String) -> bool {
         if request_token.is_empty() || request_token.len() > 128 {
             return false;
@@ -476,7 +549,22 @@ impl AppState {
 
     pub async fn shutdown(&self) {
         self.cancel_all_renders().await;
-        let _operation = self.0.operation.lock().await;
+        // A print request may be waiting on a modal native dialog or a printer
+        // driver. Do not let app exit wait forever for that operation lock.
+        // If it is still busy after the shutdown grace, terminate/reap the
+        // worker off the async executor and let process exit release PDFium.
+        let _operation = match tokio::time::timeout(SHUTDOWN_GRACE, self.0.operation.lock()).await {
+            Ok(operation) => operation,
+            Err(_) => {
+                self.0.active.lock().await.take();
+                let conn = self.0.connection.lock().await.take();
+                if let Some(conn) = conn {
+                    conn.kill().await;
+                }
+                self.0.allow_exit.store(true, Ordering::SeqCst);
+                return;
+            }
+        };
         if let Some(active) = self.0.active.lock().await.take() {
             let mut payload = active.tab.to_vec();
             payload.extend_from_slice(&active.generation.to_be_bytes());
@@ -703,6 +791,18 @@ impl Drop for RenderRegistration {
 
 impl Connection {
     async fn request(self: &Arc<Self>, frame: Frame, timeout: Duration) -> Result<Frame, String> {
+        self.request_inner(frame, Some(timeout)).await
+    }
+
+    async fn request_until_reply(self: &Arc<Self>, frame: Frame) -> Result<Frame, String> {
+        self.request_inner(frame, None).await
+    }
+
+    async fn request_inner(
+        self: &Arc<Self>,
+        frame: Frame,
+        timeout: Option<Duration>,
+    ) -> Result<Frame, String> {
         if !self.alive.load(Ordering::SeqCst) {
             return Err("PDF worker is not running".into());
         }
@@ -735,8 +835,21 @@ impl Connection {
                 .await;
             return Err(error);
         }
-        match tokio::time::timeout(timeout, rx).await {
-            Ok(Ok(Ok(frame))) => {
+        let received = if let Some(timeout) = timeout {
+            match tokio::time::timeout(timeout, rx).await {
+                Ok(result) => result,
+                Err(_) => {
+                    self.pending.lock().await.remove(&id);
+                    self.fail("worker request timed out; terminating worker".into())
+                        .await;
+                    return Err("PDF worker request timed out".into());
+                }
+            }
+        } else {
+            rx.await
+        };
+        match received {
+            Ok(Ok(frame)) => {
                 if frame.request_id == id {
                     if frame.kind == Kind::Error {
                         Err(decode_worker_error(&frame.payload))
@@ -749,14 +862,8 @@ impl Connection {
                     Err("worker response correlation mismatch".into())
                 }
             }
-            Ok(Ok(Err(error))) => Err(error),
-            Ok(Err(_)) => Err("worker response channel closed".into()),
-            Err(_) => {
-                self.pending.lock().await.remove(&id);
-                self.fail("worker request timed out; terminating worker".into())
-                    .await;
-                Err("PDF worker request timed out".into())
-            }
+            Ok(Err(error)) => Err(error),
+            Err(_) => Err("worker response channel closed".into()),
         }
     }
 
@@ -859,6 +966,7 @@ fn expected_reply(kind: Kind) -> Option<Kind> {
         Kind::Open | Kind::Close | Kind::Shutdown => Some(Kind::Ack),
         Kind::Render => Some(Kind::Page),
         Kind::Search => Some(Kind::SearchResults),
+        Kind::Print => Some(Kind::PrintResult),
         _ => None,
     }
 }

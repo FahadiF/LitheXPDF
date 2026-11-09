@@ -13,4 +13,13 @@ path = "src/main.rs"
 [dependencies]
 pdfium-protocol = { path = "../pdfium-protocol" }
 image = { version = "=0.25.10", default-features = false, features = ["png"] }
-pdfium-render = { version = "=0.9.4", default-features = false, features = ["pdfium_7881", "image_025", "thread_safe"] }
+pdfium-render = { version = "=0.9.4", default-features = false, features = ["pdfium_7881", "image_025", "thread_safe", "pdfium_use_win32"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "=0.62.2", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_System_Com",
+  "Win32_System_Memory",
+  "Win32_UI_Controls_Dialogs",
+] }

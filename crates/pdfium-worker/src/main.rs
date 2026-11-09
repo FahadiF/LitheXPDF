@@ -16,6 +16,9 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+#[cfg(windows)]
+mod print;
+
 const MAX_BITMAP_DIMENSION: u32 = 8_192;
 const MAX_BITMAP_PIXELS: u64 = 8_388_608;
 const MAX_RGBA_BITMAP_BYTES: usize = 32 * 1024 * 1024;
@@ -128,6 +131,7 @@ impl WorkerSession {
             Kind::Open => self.open(payload),
             Kind::Render => self.render(payload),
             Kind::Search => self.search(payload),
+            Kind::Print => self.print(payload),
             Kind::Close => self.close(payload),
             _ => Err((2, format!("message kind {kind:?} is not a worker request"))),
         }
@@ -361,6 +365,65 @@ impl WorkerSession {
             ));
         }
         Ok((Kind::SearchResults, response))
+    }
+
+    fn print(&mut self, payload: &[u8]) -> Result<(Kind, Vec<u8>), (u16, String)> {
+        const PRINT_REQUEST_LEN: usize = 36;
+        if payload.len() != PRINT_REQUEST_LEN {
+            return Err((4, "PRINT payload must be exactly 36 bytes".into()));
+        }
+        let tab_id: [u8; 16] = payload[..16]
+            .try_into()
+            .map_err(|_| (4, "invalid PRINT tab identifier".into()))?;
+        let generation = read_u64(payload, 16).map_err(protocol_err)?;
+        let current_page = read_u32(payload, 24).map_err(protocol_err)?;
+        let owner_window = read_u64(payload, 28).map_err(protocol_err)?;
+        if generation == 0 || self.identity != Some((tab_id, generation)) {
+            return Err((
+                6,
+                "PRINT does not match the active document generation".into(),
+            ));
+        }
+        if owner_window == 0 {
+            return Err((4, "PRINT owner window handle is invalid".into()));
+        }
+        let document = self
+            .document
+            .as_ref()
+            .ok_or_else(|| (6, "no document is open".into()))?;
+        let page_count = u32::try_from(document.pages().len())
+            .map_err(|_| (4, "PDF page count exceeds protocol range".into()))?;
+        if current_page >= page_count {
+            return Err((4, "PRINT current page is outside the document".into()));
+        }
+
+        #[cfg(windows)]
+        let outcome = {
+            let owner_window = usize::try_from(owner_window).map_err(|_| {
+                (
+                    4,
+                    "PRINT owner window handle is outside the platform range".into(),
+                )
+            })?;
+            print::print_document(document, owner_window, current_page)
+                .map_err(|error| (7, error))?
+        };
+
+        #[cfg(not(windows))]
+        let outcome = {
+            let _ = (document, owner_window);
+            return Err((
+                7,
+                "Native PDF printing is currently supported on Windows only".into(),
+            ));
+        };
+
+        let mut response = Vec::with_capacity(29);
+        response.extend_from_slice(&tab_id);
+        response.extend_from_slice(&generation.to_be_bytes());
+        response.push(u8::from(!outcome.cancelled));
+        response.extend_from_slice(&outcome.pages_printed.to_be_bytes());
+        Ok((Kind::PrintResult, response))
     }
 
     fn close(&mut self, payload: &[u8]) -> Result<(Kind, Vec<u8>), (u16, String)> {

@@ -1,7 +1,7 @@
 mod supervisor;
 
 use std::path::PathBuf;
-use supervisor::{AppState, OpenDocumentResult, TextSearchResult};
+use supervisor::{AppState, OpenDocumentResult, PrintJobResult, TextSearchResult};
 use tauri::{Manager, RunEvent};
 
 #[tauri::command]
@@ -52,6 +52,40 @@ async fn search_text(
         .await
 }
 
+#[cfg(windows)]
+#[tauri::command]
+async fn print_pdf(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, AppState>,
+    document_id: String,
+    generation: u64,
+    current_page: u32,
+) -> Result<PrintJobResult, String> {
+    let hwnd = window
+        .hwnd()
+        .map_err(|error| format!("Could not access the LitheXPDF window: {error}"))?;
+    state
+        .print_document(
+            document_id,
+            generation,
+            current_page,
+            hwnd.0 as usize as u64,
+        )
+        .await
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+async fn print_pdf(
+    state: tauri::State<'_, AppState>,
+    document_id: String,
+    generation: u64,
+    current_page: u32,
+) -> Result<PrintJobResult, String> {
+    let _ = (state, document_id, generation, current_page);
+    Err("Native PDF printing is currently supported on Windows only".into())
+}
+
 #[tauri::command]
 async fn cancel_render(
     state: tauri::State<'_, AppState>,
@@ -95,6 +129,7 @@ pub fn run() {
             open_pdf,
             render_page,
             search_text,
+            print_pdf,
             cancel_render,
             close_pdf
         ])

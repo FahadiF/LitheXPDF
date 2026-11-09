@@ -150,7 +150,7 @@ body { margin: 0; min-width: 320px; min-height: 100vh; }
   background: #fff;
   box-shadow: 0 14px 50px #0008;
 }
-#page-image {
+.page-image {
   display: block;
   width: 100%;
   height: auto;
@@ -498,20 +498,8 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .help-list { display: flex; flex-direction: column; gap: 12px; padding-left: 19px; color: #c5d0d3; font-size: 12px; line-height: 1.6; }
 kbd { padding: 2px 5px; border: 1px solid #46535a; border-radius: 3px; background: #222c31; font: 11px "Segoe UI", system-ui, sans-serif; }
 
-/* Page zoom and current-page printing */
+/* Page zoom */
 .page-stack[data-zoom] { transition: width .12s ease; }
-@media print {
-  @page { margin: 10mm; }
-  body { min-width: 0; background: #fff !important; }
-  .app-shell { display: block; width: 100%; height: auto; min-height: 0; background: #fff !important; }
-  .topbar, .tab-strip, .document-bar, .footer, .empty-state, .loading-state, .error-state, .side-panel { display: none !important; }
-  .viewer { position: static; overflow: visible; padding: 0; background: #fff !important; }
-  .page-stack { display: block; width: 100% !important; max-width: none !important; margin: 0; }
-  .page-slot { display: none; width: 100%; max-width: none; aspect-ratio: auto !important; box-shadow: none; }
-  .page-slot.print-target { display: block; break-inside: avoid; }
-  #page-image { display: block !important; position: static !important; left: auto !important; top: auto !important; width: 100% !important; height: auto !important; max-width: 100% !important; max-height: none !important; transform: none !important; object-fit: contain; }
-}
-
 
 :root[data-theme="light"] .tab-strip { background: #e8eef0; border-color: #d2dade; }
 :root[data-theme="light"] .tabs-empty { color: #64757c; }

@@ -6,7 +6,7 @@ LitheXPDF is an early-stage Windows PDF reader built with Rust, Tauri 2, TypeScr
 
 ## Current status
 
-The current reader connects the interface to a Rust host and a separate PDFium worker. It permits up to 100 document tabs in one window while keeping only one PDFium document active; inactive tabs retain path and view-position metadata. The reader includes continuous scrolling, page navigation, per-tab zoom, text search, bookmarks, dark/light themes, recent files, page preloading controls, and current-page printing. The default preloads up to 12 pages ahead in the active document, with lower and higher bounded settings available; inactive tabs are not prefetched. Search runs inside the worker and returns bounded text metadata; scanned pages without an embedded text layer are not searchable. All-page and page-range printing, menu interaction, bookmark-panel interaction, and the new preloading settings still need manual WebView2 review. PDFium compatibility beyond the exercised calls, broad document coverage, and clean-machine packaging remain open, so LitheXPDF is not ready as a packaged release.
+The current reader connects the interface to a Rust host and a separate PDFium worker. It permits up to 100 document tabs in one window while keeping only one PDFium document active; inactive tabs retain path and view-position metadata. The reader includes continuous scrolling, page navigation, per-tab zoom, text search, bookmarks, dark/light themes, recent files, page preloading controls, and Windows printing for the current page, all pages, or selected page ranges. The native print property sheet supports printer selection and exposes driver-specific page size, orientation, and other settings where available. The default warms up to 12 following page images in a bounded rolling cache after opening, then continues as the reader advances. This provides a continuous full-document scroll surface without eagerly retaining every raster image; pages beyond the warmed window can still need rendering time. Search runs inside the worker and returns bounded text metadata; scanned pages without an embedded text layer are not searchable. Multi-page printer output, menu interaction, bookmark-panel interaction, and the rolling cache still need manual Windows desktop review. A local Windows x64 0.1.0 MSI has been built, but it is unsigned and has not been installed or validated on a clean machine. PDFium compatibility beyond the exercised calls and broad document coverage remain open, so LitheXPDF is not yet ready for a public installer release.
 
 PDFium integration currently uses a specific `pdfium-render` and PDFium pairing. Compatibility beyond the calls verified so far, and reliable setup on a clean machine, still need validation. See the [testing plan](docs/TESTING.md) for current checks and release gates.
 
@@ -36,6 +36,13 @@ pnpm worker:build:windows
 pnpm worker:stage:windows
 pnpm tauri dev
 ```
+
+To build a Windows x64 MSI after completing manual release checks, use
+`pnpm release:msi` from Windows with the MSVC Rust toolchain and the VBSCRIPT
+Windows optional feature enabled. The Tauri CLI can download and validate WiX
+Toolset v3 when it is not installed. The script builds and stages the worker
+before asking Tauri to create an MSI. A locally built MSI still requires
+clean-machine installation and PDFium smoke tests before publication.
 
 The worker build and staging commands prepare the Windows x64 sidecar. PDFium runtime compatibility and clean-machine packaging are still being validated, so the development commands do not imply that a distributable build is ready.
 

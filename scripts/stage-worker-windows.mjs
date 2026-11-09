@@ -3,9 +3,12 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const targetDirectory = process.env.CARGO_TARGET_DIR
+  ? resolve(repositoryRoot, process.env.CARGO_TARGET_DIR)
+  : resolve(repositoryRoot, "target");
 const source = resolve(
-  repositoryRoot,
-  "target/x86_64-pc-windows-msvc/release/pdfium-worker.exe",
+  targetDirectory,
+  "x86_64-pc-windows-msvc/release/pdfium-worker.exe",
 );
 const destination = resolve(
   repositoryRoot,

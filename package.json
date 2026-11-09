@@ -14,7 +14,8 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "worker:build:windows": "cargo build --release --target x86_64-pc-windows-msvc -p pdfium-worker",
-    "worker:stage:windows": "node scripts/stage-worker-windows.mjs"
+    "worker:stage:windows": "node scripts/stage-worker-windows.mjs",
+    "release:msi": "pnpm worker:build:windows && pnpm worker:stage:windows && pnpm tauri build --bundles msi"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

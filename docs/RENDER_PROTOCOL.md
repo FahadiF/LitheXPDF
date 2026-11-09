@@ -50,8 +50,9 @@ by its payload:
 | 20 | length | Payload | Kind-specific binary fields |
 
 Message kinds are `OPEN=0x0001`, `RENDER=0x0002`, `CLOSE=0x0003`,
-`SHUTDOWN=0x0004`, `SEARCH=0x0005`, `READY=0x8001`, `ACK=0x8002`,
-`PAGE=0x8003`, `SEARCH_RESULTS=0x8004`, and `ERROR=0x80ff`. `READY` is the
+`SHUTDOWN=0x0004`, `SEARCH=0x0005`, `PRINT=0x0006`, `READY=0x8001`,
+`ACK=0x8002`, `PAGE=0x8003`, `SEARCH_RESULTS=0x8004`,
+`PRINT_RESULT=0x8005`, and `ERROR=0x80ff`. `READY` is the
 first worker frame and uses request ID zero;
 all other request/reply frames use the originating nonzero request ID.
 `OPEN` payload is tab ID (16 bytes), generation (u64), UTF-8 path length
@@ -79,6 +80,24 @@ must fit the 64 KiB control-payload cap. Results are emitted in document page
 order and worker search runs serially on the PDFium owner thread. Both message
 kinds use the original nonzero request ID for correlation; failures use the
 normal bounded `ERROR` shape.
+
+`PRINT` is Windows-only and has an exact 36-byte payload: tab ID (16 bytes),
+generation (u64), current zero-based page index (u32), and owner window handle
+(u64). The host obtains the handle from the Tauri window API; the frontend
+cannot supply it. `PRINT_RESULT` has an exact 29-byte payload: tab ID (16),
+generation (u64), status (u8; `0` cancelled, `1` submitted), and pages sent to
+the printer (u32). Cancellation requires a zero page count; a submitted job
+must report at least one page. Both messages use normal nonzero request-ID
+correlation. A failure uses `ERROR` and does not fabricate a print result.
+
+The worker uses the Windows native print property sheet, initially selecting
+the current page and allowing current-page, all-page, or page-range selection
+(up to 16 disjoint ranges), printer selection, and printer-driver settings.
+Paper size, orientation, and other settings depend on the installed printer
+driver. The worker caps a job at 10,000 pages. It renders selected pages
+serially on the PDFium owner thread and sends each bounded bitmap directly to
+the selected GDI printer device context. No print image is returned to the
+host or frontend.
 
 Render/open/control requests and non-image responses have a maximum 64 KiB
 payload. A `PAGE` response contains 42 bytes of fixed metadata (tab ID as 16
@@ -158,6 +177,13 @@ expiry requests termination through the same off-GUI-thread supervisor and
 then awaits process exit asynchronously. Do not reuse the shutdown grace as a
 render timeout or start it when a tab is merely switched.
 
+Native printing does not use the render deadline: the user may keep the native
+print property sheet open while selecting a printer or settings. The host
+awaits that command asynchronously while holding document-operation ordering.
+On app exit, shutdown waits asynchronously for the operation lock for at most
+the separate 2,000 ms shutdown grace; if printing still holds it, the
+supervisor terminates and reaps the worker, which cancels the print operation.
+
 Tune the provisional render default from repeated dispatch-to-result latency
 measurements (including p50/p95/p99/max, open/render/encode/IPC splits,
 false-timeout and restart rates) over the fixed fixture corpus and supported
@@ -177,20 +203,21 @@ Render a full page only, with width and height each at most 8,192 px, at most
 writer with a hard 32 MiB output cap. If the cap is exceeded, abort encoding,
 discard partial output, and return `IMAGE_TOO_LARGE`; do not retry at a larger
 size or stream an unbounded response. Keep at most one result awaiting the
-frontend. The frontend may retain validated encoded page responses only for
-the active document, with a 64 MiB hard cache cap and a mode-specific
-look-ahead of 0, 3, 12 (default), or up to 30 pages. A response above the
-protocol's 32 MiB image cap is not cached. After one second of idle time
-following the initial page display or a mode change, the frontend fills the
-selected window serially. Following user navigation or a successful prefetch,
-it continues after 40 ms. When the byte cap is reached it evicts the farthest
-cached page. Foreground work may wait for a native render already in progress;
-PDFium calls cannot be cancelled in place. On document replacement or close,
-clear all cached bytes and decoded WebView image references, clear the image
-source, and revoke its object URL. Inactive background tabs retain no encoded
-or decoded page images. Never store image data in tab metadata or persist it to
-disk. The maximum look-ahead remains bounded by both the 30-page and 64 MiB
-limits; it does not retain all images of a longer document.
+frontend. The frontend may retain validated page images only for the active
+document, with independent 64 MiB encoded-PNG and estimated decoded-RGBA caps,
+and a 30-image total limit. The mode-specific forward look-ahead is 0, 3, 12
+(default), or up to 30 pages; two previous pages may also remain cached. A
+response above the protocol's 32 MiB image cap is rejected and is not cached.
+After the initial image is installed, preloading starts after 250 ms and fills
+the selected window serially, waiting 16 ms between successful renders. Each
+validated image is attached to its corresponding page slot. When a byte or
+page-count cap is reached, the farthest inactive image is evicted. Foreground
+work may wait for a native render already in progress; PDFium calls cannot be
+cancelled in place. On document replacement or close, clear image sources and
+element references and revoke every object URL. Inactive background tabs
+retain no image elements or URLs. Never store image data in tab metadata or
+persist it to disk. The maximum look-ahead remains bounded and does not retain
+all images of a longer document.
 
 The initial renderer is bounded full-page rendering. Do not add tile/partial
 rendering, multiple live documents, or additional renderer workers without

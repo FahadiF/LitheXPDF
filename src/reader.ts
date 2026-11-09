@@ -10,16 +10,19 @@ const MAX_SEARCH_RESULTS = 250;
 const MAX_SEARCH_EXCERPT_BYTES = 128;
 const VERSION = 1;
 const PAGE_KIND = 0x8003;
-const PREFETCH_INITIAL_DELAY_MS = 1_000;
-const PREFETCH_CONTINUATION_DELAY_MS = 40;
+const PREFETCH_INITIAL_DELAY_MS = 250;
+const PREFETCH_CONTINUATION_DELAY_MS = 16;
 const PREFETCH_NEARBY_PAGES = 3;
 const PREFETCH_RECOMMENDED_PAGES = 12;
 const PREFETCH_MAXIMUM_PAGES = 30;
 const PREFETCH_CACHE_MAX_BYTES = 64 * 1024 * 1024;
+const DECODED_PAGE_CACHE_MAX_BYTES = 64 * 1024 * 1024;
+const PAGE_CACHE_BACKTRACK = 2;
+const PAGE_CACHE_MAX_PAGES = 30;
 const MAX_TABS = 100;
 const MAX_RECENT_FILES = 10;
 const RECENT_STORAGE_KEY = "lithexpdf.recent";
-const RENDER_MODE_STORAGE_KEY = "lithexpdf.renderMode.v2";
+const RENDER_MODE_STORAGE_KEY = "lithexpdf.renderMode.v3";
 const APP_VERSION = "0.1.0";
 
 type RenderMode = "current" | "nearby" | "balanced" | "maximum";
@@ -43,6 +46,14 @@ interface PrefetchTask {
   cancelled: boolean;
   promoted: boolean;
   promise: Promise<ArrayBuffer | undefined>;
+}
+
+interface CachedPageImage {
+  image: HTMLImageElement;
+  objectUrl: string;
+  encodedBytes: number;
+  decodedBytes: number;
+  loaded: boolean;
 }
 
 export interface OpenPdfResult {
@@ -107,7 +118,8 @@ export interface ReaderBridge {
 }
 
 export class PdfReaderUi {
-  private readonly image: HTMLImageElement;
+  private image: HTMLImageElement;
+  private readonly bootstrapImage: HTMLImageElement;
   private readonly pageStack: HTMLElement;
   private readonly viewer: HTMLElement;
   private readonly status: HTMLElement;
@@ -162,7 +174,6 @@ export class PdfReaderUi {
   private currentPath?: string;
   private bookmarks: Bookmark[] = [];
   private pageIndex = 0;
-  private objectUrl?: string;
   private renderedPageIndex?: number;
   private generationToken = 0;
   private renderToken = 0;
@@ -170,16 +181,19 @@ export class PdfReaderUi {
   private scrollTimer?: ReturnType<typeof setTimeout>;
   private prefetchTimer?: ReturnType<typeof setTimeout>;
   private prefetchTask?: PrefetchTask;
-  private readonly prefetchedPages = new Map<number, ArrayBuffer>();
-  private prefetchedBytes = 0;
+  private readonly pageImages = new Map<number, CachedPageImage>();
+  private cachedEncodedBytes = 0;
+  private cachedDecodedBytes = 0;
   private prefetchCursor = 0;
+  private prefetchCapacityBlocked = false;
   private searchTimer?: ReturnType<typeof setTimeout>;
   private searchSequence = 0;
   private searchRunning = false;
   private queuedSearch?: { sequence: number; documentId: string; generation: number; query: string; matchCase: boolean; wholeWord: boolean };
 
   constructor(private readonly root: ParentNode, private readonly bridge: ReaderBridge) {
-    this.image = this.required("#page-image");
+    this.bootstrapImage = this.required("#page-image");
+    this.image = this.bootstrapImage;
     this.pageStack = this.required("#page-stack");
     this.viewer = this.required("#viewer");
     this.status = this.required("#status-text");
@@ -232,7 +246,7 @@ export class PdfReaderUi {
     this.zoomOutButton?.addEventListener("click", () => this.changeZoom(-0.1));
     this.rotateLeftButton?.addEventListener("click", () => this.rotateCurrentView(-90));
     this.rotateRightButton?.addEventListener("click", () => this.rotateCurrentView(90));
-    this.printButton?.addEventListener("click", () => this.printCurrentPage());
+    this.printButton?.addEventListener("click", () => void this.printDocument());
     this.menuButton?.addEventListener("click", () => this.setMenuOpen(this.menuPanel?.hidden ?? true));
     this.recentMenuWrap?.addEventListener("pointerenter", () => this.setRecentMenuOpen(true));
     this.recentMenuWrap?.addEventListener("pointerleave", () => this.setRecentMenuOpen(false));
@@ -256,7 +270,7 @@ export class PdfReaderUi {
     this.optional<HTMLButtonElement>("#menu-zoom-out")?.addEventListener("click", () => { this.setMenuOpen(false); this.changeZoom(-0.1); });
     this.optional<HTMLButtonElement>("#menu-rotate-left")?.addEventListener("click", () => { this.setMenuOpen(false); this.rotateCurrentView(-90); });
     this.optional<HTMLButtonElement>("#menu-rotate-right")?.addEventListener("click", () => { this.setMenuOpen(false); this.rotateCurrentView(90); });
-    this.optional<HTMLButtonElement>("#menu-print")?.addEventListener("click", () => { this.setMenuOpen(false); this.printCurrentPage(); });
+    this.optional<HTMLButtonElement>("#menu-print")?.addEventListener("click", () => { this.setMenuOpen(false); void this.printDocument(); });
     this.optional<HTMLButtonElement>("#menu-settings")?.addEventListener("click", () => { this.setMenuOpen(false); this.showDialog("#settings-dialog"); });
     this.optional<HTMLButtonElement>("#menu-about")?.addEventListener("click", () => { this.setMenuOpen(false); this.showDialog("#about-dialog"); });
     this.optional<HTMLButtonElement>("#menu-help")?.addEventListener("click", () => { this.setMenuOpen(false); this.showDialog("#help-dialog"); });
@@ -305,7 +319,7 @@ export class PdfReaderUi {
     return this.root.querySelector<T>(selector);
   }
 
-  private appDocument(): Document { return this.image.ownerDocument; }
+  private appDocument(): Document { return this.bootstrapImage.ownerDocument; }
 
   private renderTabs(): void {
     if (!this.tabStrip) return;
@@ -455,7 +469,7 @@ export class PdfReaderUi {
     if (key === "o") { event.preventDefault(); void this.openPicker(); }
     else if (key === "t") { event.preventDefault(); void this.openPicker(); }
     else if (key === "w") { event.preventDefault(); void this.close(); }
-    else if (key === "p") { event.preventDefault(); this.printCurrentPage(); }
+    else if (key === "p") { event.preventDefault(); void this.printDocument(); }
     else if (key === "+" || key === "=") { event.preventDefault(); this.changeZoom(0.1); }
     else if (key === "-") { event.preventDefault(); this.changeZoom(-0.1); }
     else if (key === "tab" && this.tabs.length > 1) {
@@ -481,9 +495,12 @@ export class PdfReaderUi {
     this.zoom = next;
     this.saveActiveTabState();
     this.applyZoom();
+    this.clearPrefetchCache();
+    this.prefetchCapacityBlocked = false;
+    this.prefetchCursor = this.pageIndex + 1;
     const top = this.viewer.scrollTop;
     const left = this.viewer.scrollLeft;
-    void this.showPage(this.pageIndex);
+    void this.showPage(this.pageIndex, false, true);
     this.appDocument().defaultView?.requestAnimationFrame(() => {
       this.viewer.scrollTop = top;
       this.viewer.scrollLeft = left;
@@ -517,56 +534,56 @@ export class PdfReaderUi {
       if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) continue;
       slot.style.aspectRatio = this.rotation % 180 === 0 ? `${width} / ${height}` : `${height} / ${width}`;
     }
-    if (this.renderedPageIndex !== undefined) this.applyImageRotation(this.renderedPageIndex);
+    for (const [pageIndex, cached] of this.pageImages) this.applyImageRotation(cached.image, pageIndex);
   }
 
-  private applyImageRotation(pageIndex: number): void {
+  private applyImageRotation(image: HTMLImageElement, pageIndex: number): void {
     const slot = this.pageSlots[pageIndex];
     if (!slot) return;
     const width = Number(slot.dataset.pageWidth);
     const height = Number(slot.dataset.pageHeight);
     if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return;
     if (this.rotation === 0) {
-      this.image.style.position = "";
-      this.image.style.left = "";
-      this.image.style.top = "";
-      this.image.style.width = "";
-      this.image.style.height = "";
-      this.image.style.maxWidth = "";
-      this.image.style.maxHeight = "";
-      this.image.style.transform = "";
+      image.style.position = "";
+      image.style.left = "";
+      image.style.top = "";
+      image.style.width = "";
+      image.style.height = "";
+      image.style.maxWidth = "";
+      image.style.maxHeight = "";
+      image.style.transform = "";
       return;
     }
-    this.image.style.position = "absolute";
-    this.image.style.left = "50%";
-    this.image.style.top = "50%";
-    this.image.style.maxWidth = "none";
-    this.image.style.maxHeight = "none";
-    this.image.style.width = this.rotation % 180 === 0 ? "100%" : `${(100 * width) / height}%`;
-    this.image.style.height = this.rotation % 180 === 0 ? "auto" : `${(100 * height) / width}%`;
-    this.image.style.transform = `translate(-50%, -50%) rotate(${this.rotation}deg)`;
+    image.style.position = "absolute";
+    image.style.left = "50%";
+    image.style.top = "50%";
+    image.style.maxWidth = "none";
+    image.style.maxHeight = "none";
+    image.style.width = this.rotation % 180 === 0 ? "100%" : `${(100 * width) / height}%`;
+    image.style.height = this.rotation % 180 === 0 ? "auto" : `${(100 * height) / width}%`;
+    image.style.transform = `translate(-50%, -50%) rotate(${this.rotation}deg)`;
   }
 
-  private printCurrentPage(): void {
-    if (!this.current || this.renderedPageIndex !== this.pageIndex) {
-      this.showError("Wait for the current page to finish rendering before printing.");
-      return;
-    }
-    const slot = this.pageSlots[this.pageIndex];
-    const view = this.appDocument().defaultView;
-    if (!slot || !view?.print) {
-      this.showError("Printing is not available in this WebView.");
-      return;
-    }
-    slot.classList.add("print-target");
-    const cleanup = () => slot.classList.remove("print-target");
-    view.addEventListener("afterprint", cleanup, { once: true });
+  private async printDocument(): Promise<void> {
+    const doc = this.current;
+    if (!doc) return;
+    const generationToken = this.generationToken;
+    const pageIndex = this.pageIndex;
+    this.status.textContent = "Opening print settings";
     try {
-      view.print();
-      setTimeout(cleanup, 2_000);
+      const result = await this.bridge.invoke<{ cancelled: boolean; pages_printed: number }>("print_pdf", {
+        documentId: doc.document_id,
+        generation: doc.generation,
+        currentPage: pageIndex,
+      });
+      if (generationToken !== this.generationToken || this.current?.document_id !== doc.document_id
+        || this.current.generation !== doc.generation) return;
+      this.status.textContent = result.cancelled
+        ? "Ready"
+        : `Submitted ${result.pages_printed} ${result.pages_printed === 1 ? "page" : "pages"} to printer`;
     } catch (error) {
-      cleanup();
-      this.showError(error);
+      if (generationToken === this.generationToken && this.current?.document_id === doc.document_id
+        && this.current.generation === doc.generation) this.showError(error);
     }
   }
 
@@ -579,6 +596,7 @@ export class PdfReaderUi {
   private setRenderMode(value: string): void {
     if (value !== "current" && value !== "nearby" && value !== "balanced" && value !== "maximum") return;
     this.renderMode = value;
+    this.prefetchCapacityBlocked = false;
     try { this.appDocument().defaultView?.localStorage.setItem(RENDER_MODE_STORAGE_KEY, value); } catch { /* The selected mode remains active for this session. */ }
     this.syncRenderModeSettings();
     this.cancelPrefetch();
@@ -586,7 +604,7 @@ export class PdfReaderUi {
       this.clearPrefetchCache();
     } else {
       this.prefetchCursor = this.pageIndex + 1;
-      this.trimPrefetchCache(this.cachePageLimit());
+      this.trimPageImageCache(this.cachePageLimit());
       if (this.current) this.scheduleNextPagePrefetch(this.pageIndex, this.current, this.generationToken);
     }
   }
@@ -1003,9 +1021,10 @@ export class PdfReaderUi {
     this.searchPanel.hidden = true;
   }
 
-  private async showPage(index: number, opening = false): Promise<void> {
+  private async showPage(index: number, opening = false, forceRender = false): Promise<void> {
     const doc = this.current;
     if (!doc || index < 0 || index >= doc.page_count) return;
+    if (this.pageIndex !== index) this.prefetchCapacityBlocked = false;
     const generationToken = this.generationToken;
     const renderToken = ++this.renderToken;
     this.cancelCurrentRender();
@@ -1015,8 +1034,8 @@ export class PdfReaderUi {
     this.clearError();
     if (opening) {
       this.loading.hidden = false;
-      this.status.textContent = "Rendering page";
-    } else if (this.objectUrl) {
+      this.status.textContent = "Preparing pages";
+    } else {
       this.loading.hidden = true;
     }
     this.pageIndex = index;
@@ -1032,8 +1051,9 @@ export class PdfReaderUi {
       && this.pageIndex === index;
 
     try {
-      let buffer = this.takePrefetchedPage(index);
-      if (!buffer) {
+      let cached = forceRender ? undefined : this.pageImages.get(index);
+      if (!cached) {
+        let buffer: ArrayBuffer | undefined;
         const task = this.prefetchTask;
         if (task?.pageIndex === index && !task.cancelled) {
           task.promoted = true;
@@ -1041,66 +1061,43 @@ export class PdfReaderUi {
         } else {
           this.cancelPrefetch();
         }
+        if (!isCurrentRequest()) return;
+        if (!buffer) {
+          const requestToken = crypto.randomUUID();
+          this.activeRequestToken = requestToken;
+          const dpr = Math.min(globalThis.devicePixelRatio || 1, 2);
+          const cssWidth = Math.max(1, this.pageStack.clientWidth || this.viewer.clientWidth - 56 || 1000);
+          const [width, height] = targetDimensions(cssWidth * dpr, doc.page_width_points, doc.page_height_points);
+          try {
+            buffer = await this.bridge.invoke<ArrayBuffer>("render_page", {
+              requestToken, documentId: doc.document_id, generation: doc.generation,
+              pageIndex: index, width, height, zoom: 1,
+            });
+          } finally {
+            if (this.activeRequestToken === requestToken) this.activeRequestToken = undefined;
+          }
+          if (!isCurrentRequest()) return;
+        }
+        if (!buffer) throw new Error("The requested page could not be rendered.");
+        const parsed = parseRenderResponse(buffer, {
+          documentId: doc.document_id, generation: doc.generation, pageIndex: index,
+          tabId: uuidBytes(doc.document_id),
+        });
+        if (!isCurrentRequest()) return;
+        this.prefetchCursor = Math.max(this.prefetchCursor, index + 1);
+        cached = this.cachePageImage(index, parsed, generationToken);
       }
       if (!isCurrentRequest()) return;
-      if (!buffer) {
-        const requestToken = crypto.randomUUID();
-        this.activeRequestToken = requestToken;
-        const dpr = Math.min(globalThis.devicePixelRatio || 1, 2);
-        const cssWidth = Math.max(1, this.pageStack.clientWidth || this.viewer.clientWidth - 56 || 1000);
-        const [width, height] = targetDimensions(cssWidth * dpr, doc.page_width_points, doc.page_height_points);
-        try {
-          buffer = await this.bridge.invoke<ArrayBuffer>("render_page", {
-            requestToken, documentId: doc.document_id, generation: doc.generation,
-            pageIndex: index, width, height, zoom: 1,
-          });
-        } finally {
-          if (this.activeRequestToken === requestToken) this.activeRequestToken = undefined;
-        }
-        if (!isCurrentRequest()) return;
+      this.activatePageImage(index, cached);
+      this.applyImageRotation(cached.image, index);
+      if (cached.loaded) {
+        this.loading.hidden = true;
+        this.status.textContent = "Ready";
+        this.prunePrefetchedPages(index);
       }
-      if (!buffer) throw new Error("The requested page could not be rendered.");
-      const parsed = parseRenderResponse(buffer, {
-        documentId: doc.document_id, generation: doc.generation, pageIndex: index,
-        tabId: uuidBytes(doc.document_id),
-      });
-      if (generationToken !== this.generationToken || renderToken !== this.renderToken
-        || this.current?.document_id !== doc.document_id || this.current.generation !== doc.generation
-        || this.pageIndex !== index) return;
-      this.prefetchCursor = Math.max(this.prefetchCursor, index + 1);
-
-      const imageBuffer = parsed.png.slice().buffer as ArrayBuffer;
-      const slot = this.pageSlots[index];
-      slot.dataset.pageWidth = String(parsed.width);
-      slot.dataset.pageHeight = String(parsed.height);
-      slot.style.aspectRatio = this.rotation % 180 === 0
-        ? `${parsed.width} / ${parsed.height}`
-        : `${parsed.height} / ${parsed.width}`;
-      this.clearImage();
-      this.objectUrl = (this.bridge.createObjectURL ?? URL.createObjectURL.bind(URL))(
-        new Blob([imageBuffer], { type: "image/png" }),
-      );
-      this.image.onload = () => {
-        if (generationToken === this.generationToken && renderToken === this.renderToken) {
-          this.image.hidden = false;
-          this.renderedPageIndex = index;
-          this.loading.hidden = true;
-          this.status.textContent = "Ready";
-          this.updateControls();
-        }
-      };
-      this.image.onerror = () => {
-        if (generationToken === this.generationToken && renderToken === this.renderToken) {
-          this.clearImage();
-          this.loading.hidden = true;
-          this.showError("The rendered page could not be decoded by WebView2.");
-        }
-      };
-      slot.append(this.image);
-      this.applyImageRotation(index);
-      this.image.hidden = true;
-      this.image.src = this.objectUrl;
+      this.trimPageImageCache(this.cachePageLimit());
       this.scheduleNextPagePrefetch(index, doc, generationToken, !opening);
+      this.updateControls();
     } catch (error) {
       if (generationToken === this.generationToken && renderToken === this.renderToken) {
         this.loading.hidden = true;
@@ -1111,7 +1108,7 @@ export class PdfReaderUi {
 
   private scheduleNextPagePrefetch(pageIndex: number, doc: OpenPdfResult, generationToken: number, continuation = false): void {
     this.cancelPrefetch();
-    if (this.renderMode === "current") return;
+    if (this.renderMode === "current" || this.prefetchCapacityBlocked) return;
     const lookAhead = this.lookAheadPageCount();
     const lastPage = Math.min(doc.page_count - 1, pageIndex + lookAhead);
     if (this.prefetchCursor <= pageIndex || this.prefetchCursor > lastPage) this.prefetchCursor = pageIndex + 1;
@@ -1137,14 +1134,13 @@ export class PdfReaderUi {
   }
 
   private cachePageLimit(): number {
-    if (this.renderMode === "nearby") return PREFETCH_NEARBY_PAGES;
-    if (this.renderMode === "maximum") return PREFETCH_MAXIMUM_PAGES;
-    return PREFETCH_RECOMMENDED_PAGES;
+    if (this.renderMode === "current") return 1;
+    return Math.min(PAGE_CACHE_MAX_PAGES, this.lookAheadPageCount() + PAGE_CACHE_BACKTRACK + 1);
   }
 
   private nextUncachedPrefetchPage(startPage: number, lastPage: number): number {
     let page = startPage;
-    while (page <= lastPage && this.prefetchedPages.has(page)) page++;
+    while (page <= lastPage && this.pageImages.has(page)) page++;
     this.prefetchCursor = page;
     return page <= lastPage ? page : -1;
   }
@@ -1160,20 +1156,21 @@ export class PdfReaderUi {
       });
       if (task.cancelled || task.generationToken !== this.generationToken
         || this.current?.document_id !== doc.document_id || this.current.generation !== doc.generation) return undefined;
-      parseRenderResponse(buffer, {
+      const parsed = parseRenderResponse(buffer, {
         documentId: doc.document_id, generation: doc.generation, pageIndex: task.pageIndex,
         tabId: uuidBytes(doc.document_id),
       });
       this.prefetchCursor = Math.max(this.prefetchCursor, task.pageIndex + 1);
       if (task.promoted) return buffer;
-      this.cachePrefetchedPage(task.pageIndex, buffer);
+      this.cachePageImage(task.pageIndex, parsed, task.generationToken);
+      if (!this.pageImages.has(task.pageIndex)) this.prefetchCapacityBlocked = true;
       return undefined;
     } catch {
       if (!task.cancelled) this.prefetchCursor = Math.max(this.prefetchCursor, task.pageIndex + 1);
       return undefined;
     } finally {
       if (this.prefetchTask === task) this.prefetchTask = undefined;
-      if (!task.promoted && this.renderMode !== "current" && !task.cancelled
+      if (!task.promoted && this.renderMode !== "current" && !this.prefetchCapacityBlocked && !task.cancelled
         && task.generationToken === this.generationToken
         && this.current?.document_id === doc.document_id
         && this.current.generation === doc.generation) {
@@ -1182,50 +1179,130 @@ export class PdfReaderUi {
     }
   }
 
-  private cachePrefetchedPage(pageIndex: number, buffer: ArrayBuffer): void {
-    if (buffer.byteLength > PREFETCH_CACHE_MAX_BYTES) return;
-    const previous = this.prefetchedPages.get(pageIndex);
-    if (previous) this.prefetchedBytes -= previous.byteLength;
-    this.prefetchedPages.delete(pageIndex);
-    this.prefetchedPages.set(pageIndex, buffer);
-    this.prefetchedBytes += buffer.byteLength;
-    this.trimPrefetchCache(this.cachePageLimit());
+  private cachePageImage(pageIndex: number, parsed: ParsedPage, generationToken: number): CachedPageImage {
+    this.releasePageImage(pageIndex);
+    const slot = this.pageSlots[pageIndex];
+    if (!slot) throw new Error("The page is no longer part of the active document.");
+
+    const image = !this.bootstrapImage.isConnected && !this.bootstrapImage.hasAttribute("src")
+      ? this.bootstrapImage
+      : this.appDocument().createElement("img");
+    image.className = "page-image";
+    image.alt = `Page ${pageIndex + 1}`;
+    image.dataset.pageIndex = String(pageIndex);
+    image.hidden = false;
+
+    slot.dataset.pageWidth = String(parsed.width);
+    slot.dataset.pageHeight = String(parsed.height);
+    slot.style.aspectRatio = this.rotation % 180 === 0
+      ? `${parsed.width} / ${parsed.height}`
+      : `${parsed.height} / ${parsed.width}`;
+
+    const imageBuffer = parsed.png.slice().buffer as ArrayBuffer;
+    const objectUrl = (this.bridge.createObjectURL ?? URL.createObjectURL.bind(URL))(
+      new Blob([imageBuffer], { type: "image/png" }),
+    );
+    const entry: CachedPageImage = {
+      image,
+      objectUrl,
+      encodedBytes: parsed.png.byteLength,
+      decodedBytes: parsed.width * parsed.height * 4,
+      loaded: false,
+    };
+    this.pageImages.set(pageIndex, entry);
+    this.cachedEncodedBytes += entry.encodedBytes;
+    this.cachedDecodedBytes += entry.decodedBytes;
+    image.onload = () => {
+      if (this.pageImages.get(pageIndex) !== entry) return;
+      entry.loaded = true;
+      this.applyImageRotation(image, pageIndex);
+      if (generationToken === this.generationToken && this.renderedPageIndex === pageIndex
+        && this.current && this.pageIndex === pageIndex) {
+        this.loading.hidden = true;
+        this.status.textContent = "Ready";
+        this.prunePrefetchedPages(pageIndex);
+        this.updateControls();
+      }
+    };
+    image.onerror = () => {
+      if (this.pageImages.get(pageIndex) !== entry) return;
+      const wasActive = this.renderedPageIndex === pageIndex;
+      this.releasePageImage(pageIndex);
+      if (wasActive && generationToken === this.generationToken) {
+        this.loading.hidden = true;
+        this.showError("The rendered page could not be decoded by WebView2.");
+      }
+    };
+    slot.append(image);
+    image.src = objectUrl;
+    this.trimPageImageCache(this.cachePageLimit());
+    return entry;
   }
 
-  private trimPrefetchCache(maxPages: number): void {
-    while (this.prefetchedPages.size > maxPages || this.prefetchedBytes > PREFETCH_CACHE_MAX_BYTES) {
-      const pages = [...this.prefetchedPages.keys()];
-      if (pages.length === 0) break;
-      const farthest = pages.reduce((result, page) => {
+  private activatePageImage(pageIndex: number, entry: CachedPageImage): void {
+    if (this.image !== entry.image) this.image.removeAttribute("id");
+    this.image = entry.image;
+    this.image.id = "page-image";
+    this.image.hidden = false;
+    this.renderedPageIndex = pageIndex;
+  }
+
+  private trimPageImageCache(maxPages: number): void {
+    while (this.pageImages.size > maxPages
+      || this.cachedEncodedBytes > PREFETCH_CACHE_MAX_BYTES
+      || this.cachedDecodedBytes > DECODED_PAGE_CACHE_MAX_BYTES) {
+      const candidates = [...this.pageImages.keys()].filter((page) =>
+        page !== this.pageIndex && page !== this.renderedPageIndex);
+      if (candidates.length === 0) break;
+      const farthest = candidates.reduce((result, page) => {
         const distance = Math.abs(page - this.pageIndex);
         const farthestDistance = Math.abs(result - this.pageIndex);
         return distance > farthestDistance || (distance === farthestDistance && page > result) ? page : result;
       });
-      const evicted = this.prefetchedPages.get(farthest);
-      this.prefetchedPages.delete(farthest);
-      if (evicted) this.prefetchedBytes -= evicted.byteLength;
+      this.releasePageImage(farthest);
     }
   }
 
   private prunePrefetchedPages(pageIndex: number): void {
-    for (const [cachedPage, buffer] of this.prefetchedPages) {
-      if (cachedPage >= pageIndex) continue;
-      this.prefetchedPages.delete(cachedPage);
-      this.prefetchedBytes -= buffer.byteLength;
+    for (const cachedPage of this.pageImages.keys()) {
+      if (cachedPage === this.renderedPageIndex || cachedPage >= pageIndex - PAGE_CACHE_BACKTRACK) continue;
+      this.releasePageImage(cachedPage);
     }
+    this.trimPageImageCache(this.cachePageLimit());
   }
 
   private clearPrefetchCache(): void {
-    this.prefetchedPages.clear();
-    this.prefetchedBytes = 0;
+    for (const cachedPage of this.pageImages.keys()) {
+      if (cachedPage !== this.renderedPageIndex) this.releasePageImage(cachedPage);
+    }
+    this.trimPageImageCache(this.cachePageLimit());
   }
 
-  private takePrefetchedPage(pageIndex: number): ArrayBuffer | undefined {
-    const buffer = this.prefetchedPages.get(pageIndex);
-    if (!buffer) return undefined;
-    this.prefetchedPages.delete(pageIndex);
-    this.prefetchedBytes -= buffer.byteLength;
-    return buffer;
+  private releasePageImage(pageIndex: number): void {
+    const entry = this.pageImages.get(pageIndex);
+    if (!entry) return;
+    this.pageImages.delete(pageIndex);
+    this.cachedEncodedBytes = Math.max(0, this.cachedEncodedBytes - entry.encodedBytes);
+    this.cachedDecodedBytes = Math.max(0, this.cachedDecodedBytes - entry.decodedBytes);
+    entry.image.onload = null;
+    entry.image.onerror = null;
+    entry.image.removeAttribute("src");
+    entry.image.hidden = true;
+    entry.image.style.position = "";
+    entry.image.style.left = "";
+    entry.image.style.top = "";
+    entry.image.style.width = "";
+    entry.image.style.height = "";
+    entry.image.style.maxWidth = "";
+    entry.image.style.maxHeight = "";
+    entry.image.style.transform = "";
+    entry.image.remove();
+    (this.bridge.revokeObjectURL ?? URL.revokeObjectURL.bind(URL))(entry.objectUrl);
+    if (this.image === entry.image) {
+      this.image.removeAttribute("id");
+      this.image = this.bootstrapImage;
+      this.renderedPageIndex = undefined;
+    }
   }
 
   private cancelPrefetch(): void {
@@ -1242,6 +1319,7 @@ export class PdfReaderUi {
     this.cancelPrefetch();
     this.clearPrefetchCache();
     this.prefetchCursor = 0;
+    this.prefetchCapacityBlocked = false;
   }
 
   private async closeCurrentDocument(): Promise<void> {
@@ -1282,11 +1360,17 @@ export class PdfReaderUi {
   }
 
   private clearImage(): void {
+    for (const pageIndex of [...this.pageImages.keys()]) this.releasePageImage(pageIndex);
+    this.cachedEncodedBytes = 0;
+    this.cachedDecodedBytes = 0;
     this.renderedPageIndex = undefined;
+    this.image = this.bootstrapImage;
+    this.image.id = "page-image";
     this.image.onload = null;
     this.image.onerror = null;
     this.image.removeAttribute("src");
     this.image.hidden = true;
+    this.image.dataset.pageIndex = "";
     this.image.style.position = "";
     this.image.style.left = "";
     this.image.style.top = "";
@@ -1295,7 +1379,6 @@ export class PdfReaderUi {
     this.image.style.maxWidth = "";
     this.image.style.maxHeight = "";
     this.image.style.transform = "";
-    if (this.objectUrl) { (this.bridge.revokeObjectURL ?? URL.revokeObjectURL.bind(URL))(this.objectUrl); this.objectUrl = undefined; }
   }
 
   private cancelCurrentRender(): void {
@@ -1322,7 +1405,7 @@ export class PdfReaderUi {
     const menuRotateRight = this.optional<HTMLButtonElement>("#menu-rotate-right");
     if (menuRotateLeft) menuRotateLeft.disabled = !doc;
     if (menuRotateRight) menuRotateRight.disabled = !doc;
-    if (this.printButton) this.printButton.disabled = !doc || this.renderedPageIndex !== this.pageIndex;
+    if (this.printButton) this.printButton.disabled = !doc;
     this.previousButton.disabled = !doc || this.pageIndex <= 0;
     this.nextButton.disabled = !doc || this.pageIndex >= doc.page_count - 1;
     this.pageNumber.disabled = !doc;
