@@ -1,0 +1,22 @@
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # glib is a Linux-only transitive dependency pulled in through gtk → tauri.
+    # LitheXPDF targets Windows exclusively; glib, gtk, and webkit2gtk are never
+    # compiled or shipped in Windows builds (they are excluded by Cargo's platform
+    # cfg filter). The GHSA advisory does not apply to this project.
+    ignore:
+      - dependency-name: "glib"
+        reason: "Linux-only transitive dep via gtk/tauri; never compiled on Windows builds"
+      - dependency-name: "glib-sys"
+        reason: "Linux-only transitive dep via gtk/tauri; never compiled on Windows builds"
+      - dependency-name: "glib-macros"
+        reason: "Linux-only transitive dep via gtk/tauri; never compiled on Windows builds"
+
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
