@@ -19,7 +19,11 @@ const reader = new PdfReaderUi(document, {
 });
 if (isTauri()) {
   void invoke<string | null>("take_startup_pdf_path")
-    .then((path) => { if (path) return reader.open(path); })
+    .then((path) => {
+      if (path) return reader.open(path);
+      // No file passed on the command line — restore the previous session.
+      return reader.restoreSession();
+    })
     .catch((error: unknown) => console.error("Unable to open the PDF passed to LitheXPDF.", error));
 }
 installThemeToggle(document.documentElement, (() => {

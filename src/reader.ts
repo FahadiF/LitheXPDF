@@ -27,6 +27,8 @@ const RENDER_MODE_STORAGE_KEY = "lithexpdf.renderMode.v3";
 const RENDER_QUALITY_STORAGE_KEY = "lithexpdf.renderQuality.v1";
 const DEFAULT_PDF_STARTUP_PROMPT_KEY = "lithexpdf.defaultPdfStartupPrompt.v1";
 const DEFAULT_PDF_FIRST_RUN_SEEN_KEY = "lithexpdf.defaultPdfFirstRunSeen.v1";
+const SESSION_RESTORE_KEY = "lithexpdf.sessionRestore.v1";
+const SESSION_TABS_KEY = "lithexpdf.sessionTabs.v1";
 const APP_VERSION = "0.1.1";
 
 type RenderMode = "current" | "nearby" | "balanced" | "maximum";
@@ -157,6 +159,7 @@ export class PdfReaderUi {
   private readonly tabStrip: HTMLElement | null;
   private readonly tabsEmpty: HTMLElement | null;
   private readonly newTabButton: HTMLButtonElement | null;
+  private readonly tabContextMenu: HTMLElement | null;
   private readonly menuButton: HTMLButtonElement | null;
   private readonly menuPanel: HTMLElement | null;
   private readonly recentMenuWrap: HTMLElement | null;
@@ -180,6 +183,9 @@ export class PdfReaderUi {
   private readonly printError: HTMLElement;
   private readonly tabs: ReaderTab[] = [];
   private activeTabId?: string;
+  private closedTabPaths: string[] = [];
+  private tabDragState?: { tabId: string; originIndex: number; startX: number; currentIndex: number };
+  private sessionRestoreEnabled = readSessionRestoreEnabled();
   private zoom = 1;
   private rotation: PageRotation = 0;
   private renderMode: RenderMode = readRenderMode();
@@ -241,6 +247,7 @@ export class PdfReaderUi {
     this.tabStrip = this.optional("#tab-strip");
     this.tabsEmpty = this.optional("#tabs-empty");
     this.newTabButton = this.optional<HTMLButtonElement>("#new-tab-button");
+    this.tabContextMenu = this.optional("#tab-context-menu");
     this.menuButton = this.optional<HTMLButtonElement>("#menu-button");
     this.menuPanel = this.optional("#menu-panel");
     this.recentMenuWrap = this.optional(".recent-menu-wrap");
@@ -363,6 +370,15 @@ export class PdfReaderUi {
     this.searchMatchCase.addEventListener("change", () => this.startSearch(true));
     this.searchWholeWord.addEventListener("change", () => this.startSearch(true));
     this.setupDefaultPdfAssociation();
+    this.setupSessionRestoreSettings();
+    this.appDocument().addEventListener("pointerdown", () => this.hideTabContextMenu());
+    this.appDocument().addEventListener("keydown", (e) => { if ((e as KeyboardEvent).key === "Escape") this.hideTabContextMenu(); }, true);
+    this.tabContextMenu?.addEventListener("click", (e) => {
+      const btn = (e.target as HTMLElement).closest<HTMLButtonElement>("[data-action]");
+      if (!btn || !this.tabContextMenu?.dataset.tabId) return;
+      this.handleTabContextAction(btn.dataset.action!, this.tabContextMenu.dataset.tabId);
+    });
+    this.tabContextMenu?.addEventListener("pointerdown", (e) => e.stopPropagation());
   }
 
   private optional<T extends HTMLElement = HTMLElement>(selector: string): T | null {
@@ -376,11 +392,15 @@ export class PdfReaderUi {
     this.tabStrip.querySelectorAll(".tab-item").forEach((item) => item.remove());
     if (this.tabsEmpty) this.tabsEmpty.hidden = this.tabs.length > 0;
     const doc = this.appDocument();
-    for (const tab of this.tabs) {
+    for (let i = 0; i < this.tabs.length; i++) {
+      const tab = this.tabs[i]!;
       const item = doc.createElement("div");
       item.className = "tab-item";
+      item.dataset.tabId = tab.id;
+      item.draggable = true;
       const active = tab.id === this.activeTabId;
       item.classList.toggle("active", active);
+
       const select = doc.createElement("button");
       select.type = "button";
       select.className = "document-tab";
@@ -393,6 +413,7 @@ export class PdfReaderUi {
       title.textContent = tab.name;
       select.append(title);
       select.addEventListener("click", () => void this.activateTab(tab.id));
+
       const close = doc.createElement("button");
       close.type = "button";
       close.className = "document-tab-close";
@@ -403,20 +424,51 @@ export class PdfReaderUi {
         event.stopPropagation();
         void this.closeTabById(tab.id);
       });
+
+      // Drag to reorder
+      item.addEventListener("dragstart", (e) => {
+        const de = e as DragEvent;
+        this.tabDragState = { tabId: tab.id, originIndex: this.tabs.indexOf(tab), startX: de.clientX, currentIndex: this.tabs.indexOf(tab) };
+        item.classList.add("dragging");
+        de.dataTransfer?.setData("text/plain", tab.id);
+      });
+      item.addEventListener("dragend", () => { item.classList.remove("dragging"); this.tabDragState = undefined; });
+      item.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        const ds = this.tabDragState;
+        if (!ds || ds.tabId === tab.id) return;
+        const targetIndex = this.tabs.indexOf(tab);
+        if (targetIndex < 0 || targetIndex === ds.currentIndex) return;
+        const [moved] = this.tabs.splice(ds.currentIndex, 1);
+        if (moved) { this.tabs.splice(targetIndex, 0, moved); ds.currentIndex = targetIndex; }
+        this.renderTabs();
+        this.persistSession();
+      });
+
+      // Right-click context menu
+      item.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        this.showTabContextMenu(tab.id, (e as MouseEvent).clientX, (e as MouseEvent).clientY);
+      });
+
       item.append(select, close);
       this.tabStrip.insertBefore(item, this.newTabButton);
     }
   }
 
   private async closeTabById(tabId: string): Promise<void> {
-    if (tabId === this.activeTabId) {
-      await this.close();
-      return;
-    }
     const index = this.tabs.findIndex((tab) => tab.id === tabId);
     if (index < 0) return;
-    this.tabs.splice(index, 1);
-    this.renderTabs();
+    // Track for "restore recently closed"
+    const closingPath = this.tabs[index]!.path;
+    if (tabId === this.activeTabId) {
+      await this.close();
+    } else {
+      this.tabs.splice(index, 1);
+      this.renderTabs();
+    }
+    this.closedTabPaths = [closingPath, ...this.closedTabPaths.filter((p) => p !== closingPath)].slice(0, 10);
+    this.persistSession();
   }
 
   private saveActiveTabState(): void {
@@ -428,6 +480,57 @@ export class PdfReaderUi {
     tab.rotation = this.rotation;
     tab.scrollTop = this.viewer.scrollTop;
     tab.scrollLeft = this.viewer.scrollLeft;
+  }
+
+  private persistSession(): void {
+    if (!this.sessionRestoreEnabled) return;
+    try {
+      const storage = this.safeStorage();
+      if (!storage) return;
+      const session: SavedSession = {
+        tabs: this.tabs.map((t) => ({ path: t.path, pageIndex: t.pageIndex, zoom: t.zoom, rotation: t.rotation })),
+        activeTabPath: this.tabs.find((t) => t.id === this.activeTabId)?.path,
+      };
+      storage.setItem(SESSION_TABS_KEY, JSON.stringify(session));
+    } catch { /* Session persist is best-effort. */ }
+  }
+
+  async restoreSession(): Promise<void> {
+    if (!this.sessionRestoreEnabled) return;
+    const { tabs, activeTabPath } = readSavedSession();
+    if (tabs.length === 0) return;
+    for (const saved of tabs) {
+      if (this.tabs.some((t) => normalizeLocalPath(t.path) === normalizeLocalPath(saved.path))) continue;
+      const tab: ReaderTab = {
+        id: crypto.randomUUID().replaceAll("-", ""),
+        path: saved.path,
+        name: saved.path.split(/[/\\]/).at(-1) ?? saved.path,
+        pageIndex: saved.pageIndex ?? 0,
+        zoom: typeof saved.zoom === "number" ? saved.zoom : 1,
+        rotation: normalizeRotation(saved.rotation ?? 0),
+        scrollTop: 0,
+        scrollLeft: 0,
+      };
+      this.tabs.push(tab);
+    }
+    this.renderTabs();
+    const target = activeTabPath
+      ? this.tabs.find((t) => normalizeLocalPath(t.path) === normalizeLocalPath(activeTabPath))
+      : this.tabs[0];
+    if (target) await this.activateTab(target.id);
+  }
+
+  private setupSessionRestoreSettings(): void {
+    const toggle = this.optional<HTMLInputElement>("#session-restore-toggle");
+    if (!toggle) return;
+    toggle.checked = this.sessionRestoreEnabled;
+    toggle.addEventListener("change", () => {
+      this.sessionRestoreEnabled = toggle.checked;
+      try {
+        this.safeStorage()?.setItem(SESSION_RESTORE_KEY, String(toggle.checked));
+      } catch { /* Preference stored for this session. */ }
+      if (toggle.checked) this.persistSession();
+    });
   }
 
   private recordRecentPath(path: string): void {
@@ -480,6 +583,77 @@ export class PdfReaderUi {
     if (!this.recentSubmenu) return;
     this.recentSubmenu.hidden = !open;
     this.recentTrigger?.setAttribute("aria-expanded", String(open));
+  }
+
+  private showTabContextMenu(tabId: string, x: number, y: number): void {
+    const menu = this.tabContextMenu;
+    if (!menu) return;
+    const index = this.tabs.findIndex((t) => t.id === tabId);
+    if (index < 0) return;
+    menu.dataset.tabId = tabId;
+    // Populate dynamic items
+    const closeLeft = menu.querySelector<HTMLButtonElement>("[data-action='close-left']");
+    const closeRight = menu.querySelector<HTMLButtonElement>("[data-action='close-right']");
+    const restoreTab = menu.querySelector<HTMLButtonElement>("[data-action='restore-tab']");
+    if (closeLeft) closeLeft.disabled = index === 0;
+    if (closeRight) closeRight.disabled = index === this.tabs.length - 1;
+    if (restoreTab) restoreTab.disabled = this.closedTabPaths.length === 0;
+    // Position
+    const vw = this.appDocument().documentElement.clientWidth;
+    const vh = this.appDocument().documentElement.clientHeight;
+    menu.hidden = false;
+    const mw = menu.offsetWidth || 220;
+    const mh = menu.offsetHeight || 200;
+    menu.style.left = Math.min(x, vw - mw - 8) + "px";
+    menu.style.top = Math.min(y, vh - mh - 8) + "px";
+    menu.querySelector<HTMLElement>("[data-action]")?.focus();
+  }
+
+  private hideTabContextMenu(): void {
+    if (this.tabContextMenu) this.tabContextMenu.hidden = true;
+  }
+
+  private handleTabContextAction(action: string, tabId: string): void {
+    const index = this.tabs.findIndex((t) => t.id === tabId);
+    this.hideTabContextMenu();
+    switch (action) {
+      case "close": void this.closeTabById(tabId); break;
+      case "close-others":
+        void (async () => {
+          for (const tab of [...this.tabs]) {
+            if (tab.id !== tabId) await this.closeTabById(tab.id);
+          }
+        })();
+        break;
+      case "close-left":
+        void (async () => {
+          for (const tab of this.tabs.slice(0, index)) await this.closeTabById(tab.id);
+        })();
+        break;
+      case "close-right":
+        void (async () => {
+          for (const tab of this.tabs.slice(index + 1)) await this.closeTabById(tab.id);
+        })();
+        break;
+      case "close-all":
+        void (async () => { for (const tab of [...this.tabs]) await this.closeTabById(tab.id); })();
+        break;
+      case "restore-tab": {
+        const path = this.closedTabPaths.shift();
+        if (path) void this.open(path);
+        break;
+      }
+      case "copy-path": {
+        const tab = this.tabs[index];
+        if (tab) void navigator.clipboard.writeText(tab.path).catch(() => undefined);
+        break;
+      }
+      case "open-in-explorer": {
+        const tab = this.tabs[index];
+        if (tab) void this.bridge.invoke("show_in_explorer", { path: tab.path }).catch(() => undefined);
+        break;
+      }
+    }
   }
 
   private showDialog(selector: string): void {
@@ -814,6 +988,9 @@ export class PdfReaderUi {
       await this.closeCurrentDocument();
       return;
     }
+    // Track for "restore recently closed"
+    const closingPath = this.tabs.find((t) => t.id === closingId)?.path;
+    if (closingPath) this.closedTabPaths = [closingPath, ...this.closedTabPaths.filter((p) => p !== closingPath)].slice(0, 10);
     this.saveActiveTabState();
     const closingIndex = this.tabs.findIndex((tab) => tab.id === closingId);
     const nextId = this.tabs[closingIndex + 1]?.id ?? this.tabs[closingIndex - 1]?.id;
@@ -822,6 +999,7 @@ export class PdfReaderUi {
     if (latestIndex >= 0) this.tabs.splice(latestIndex, 1);
     this.activeTabId = undefined;
     this.renderTabs();
+    this.persistSession();
     if (nextId && this.tabs.some((tab) => tab.id === nextId)) await this.activateTab(nextId);
   }
 
@@ -863,6 +1041,7 @@ export class PdfReaderUi {
     this.tabs.push(tab);
     this.renderTabs();
     await this.activateTab(tab.id);
+    this.persistSession();
   }
 
   private async activateTab(tabId: string): Promise<void> {
@@ -1664,6 +1843,36 @@ function readRecentPaths(): string[] {
     if (!Array.isArray(value)) return [];
     return value.filter((path): path is string => typeof path === "string" && path.length > 0).slice(0, MAX_RECENT_FILES);
   } catch { return []; }
+}
+
+function readSessionRestoreEnabled(): boolean {
+  try {
+    const v = globalThis.localStorage?.getItem(SESSION_RESTORE_KEY);
+    // Default ON — restore unless explicitly disabled.
+    return v === null || v === "true";
+  } catch { return true; }
+}
+
+interface SavedSession {
+  tabs: Array<{ path: string; pageIndex: number; zoom: number; rotation: number }>;
+  activeTabPath: string | undefined;
+}
+
+function readSavedSession(): SavedSession {
+  try {
+    const raw = globalThis.localStorage?.getItem(SESSION_TABS_KEY);
+    if (!raw) return { tabs: [], activeTabPath: undefined };
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || !Array.isArray((parsed as Record<string, unknown>).tabs)) return { tabs: [], activeTabPath: undefined };
+    const p = parsed as Record<string, unknown>;
+    const tabs = (p.tabs as unknown[]).filter((t): t is SavedSession["tabs"][number] => {
+      if (!t || typeof t !== "object") return false;
+      const tab = t as Record<string, unknown>;
+      return typeof tab.path === "string" && tab.path.length > 0;
+    }).slice(0, MAX_TABS);
+    const activeTabPath = typeof p.activeTabPath === "string" ? p.activeTabPath : undefined;
+    return { tabs, activeTabPath };
+  } catch { return { tabs: [], activeTabPath: undefined }; }
 }
 
 function validateTextSearchResponse(value: unknown, pageCount: number): TextSearchResponse {
