@@ -204,6 +204,20 @@
         <p id="tabs-empty" class="tabs-empty">No documents open</p>
         <button id="new-tab-button" class="new-tab-button" type="button" aria-label="Open a PDF in a new tab" title="New tab (Ctrl+T)">+</button>
       </nav>
+
+      <!-- Tab right-click context menu -->
+      <div id="tab-context-menu" class="tab-context-menu" role="menu" hidden aria-label="Tab options">
+        <button class="tab-ctx-item" type="button" role="menuitem" data-action="close">Close tab</button>
+        <button class="tab-ctx-item" type="button" role="menuitem" data-action="close-others">Close other tabs</button>
+        <button class="tab-ctx-item" type="button" role="menuitem" data-action="close-left">Close tabs to the left</button>
+        <button class="tab-ctx-item" type="button" role="menuitem" data-action="close-right">Close tabs to the right</button>
+        <button class="tab-ctx-item" type="button" role="menuitem" data-action="close-all">Close all tabs</button>
+        <div class="tab-ctx-sep" role="separator"></div>
+        <button class="tab-ctx-item" type="button" role="menuitem" data-action="restore-tab">Restore recently closed tab</button>
+        <div class="tab-ctx-sep" role="separator"></div>
+        <button class="tab-ctx-item" type="button" role="menuitem" data-action="copy-path">Copy file path</button>
+        <button class="tab-ctx-item" type="button" role="menuitem" data-action="open-in-explorer">Show in Explorer</button>
+      </div>
       <span id="document-name" hidden></span>
       <section id="viewer" class="viewer" aria-label="PDF page">
         <div id="empty-state" class="empty-state">
@@ -342,6 +356,14 @@
         </div>
         <button id="open-default-app-settings" class="button" type="button">Choose default PDF app in Windows</button>
         <p id="default-app-error" class="dialog-note" role="alert" hidden></p>
+      </fieldset>
+      <fieldset class="render-options">
+        <legend>Session</legend>
+        <div class="render-choice">
+          <label class="render-choice-main"><input id="session-restore-toggle" type="checkbox" /><span><strong>Reopen tabs from last session at startup</strong></span></label>
+          <button class="info-toggle" type="button" aria-label="More about session restore" aria-controls="session-restore-info" aria-expanded="false" data-option-info>i</button>
+          <p id="session-restore-info" class="choice-info" hidden>When enabled, all open tabs and your position in each document are saved automatically. The next time you launch LitheXPDF, they are restored. Disabling this clears the saved session.</p>
+        </div>
       </fieldset>
       <div class="settings-info">
         <button class="info-toggle" type="button" aria-label="More about image cache limits" aria-controls="cache-info" aria-expanded="false" data-option-info>i</button>
