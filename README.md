@@ -1,78 +1,128 @@
 # LitheXPDF
 
-LitheXPDF is an early-stage Windows PDF reader built with Rust, Tauri 2, TypeScript, and PDFium. The long-term goal is a lightweight reader that can keep 30 or more documents open in tabs.
+A fast, lightweight Windows PDF reader built with Rust, Tauri 2, TypeScript, and PDFium. Open dozens of documents in tabs while keeping memory use low — only the active document is fully rendered; every other tab holds just its path and last-read position.
 
-**Light on memory. Fast through documents.**
+<img width="1106" height="694" alt="LitheXPDF reader with dark theme" src="https://github.com/user-attachments/assets/ea50296f-ac00-428c-96e1-b8a7c77d8d5d" />
 
-<img width="1106" height="694" alt="image" src="https://github.com/user-attachments/assets/ea50296f-ac00-428c-96e1-b8a7c77d8d5d" />
+<img width="1160" height="841" alt="LitheXPDF reader with light theme" src="https://github.com/user-attachments/assets/438efc2b-6a73-4fba-855c-01484d841cef" />
 
-<img width="1160" height="841" alt="image" src="https://github.com/user-attachments/assets/438efc2b-6a73-4fba-855c-01484d841cef" />
+---
 
-## Current status
+## Features
 
-The current reader connects the interface to a Rust host and a separate PDFium worker. It permits up to 100 document tabs in one window while keeping only one PDFium document active; inactive tabs retain path and view-position metadata. The reader includes continuous scrolling, page navigation, per-tab zoom, text search, bookmarks, dark/light themes, recent files, page preloading controls, and Windows printing. Printing starts with a LitheXPDF-styled page selector showing the document's total page count and validating a page range, then opens Windows printer selection and driver settings. The worker prints one bounded page bitmap at a time, with a 10,000-page job limit. The default warms up to 12 following page images in a bounded rolling cache after opening, then continues as the reader advances. This provides a continuous full-document scroll surface without eagerly retaining every raster image; pages beyond the warmed window can still need rendering time. Search runs inside the worker and returns bounded text metadata; scanned pages without an embedded text layer are not searchable. A Windows x64 0.1.0 preview MSI is publicly available. The current 0.1.1 working-tree build is a local candidate and has not been published. Both builds are unsigned; installation on a clean machine remains unverified. The 0.1.0 MSI's installed-product entry uses the LitheXPDF ICO; the setup wizard uses WiX's standard layout. PDFium compatibility beyond the exercised calls, broad document coverage, and the latest cache/printing workflow remain under validation; the preview is not a verified 1.0 release.
+- **Multi-tab** — open up to 100 PDF documents at once; switch instantly between them
+- **Session restore** — reopen all tabs from the previous session at startup (on by default, can be disabled in Options)
+- **Tab management** — drag tabs to reorder; right-click any tab for close, close others, restore recently closed, copy path, and Show in Explorer
+- **Continuous scroll** — smooth vertical scrolling through every page
+- **Page preloading** — four preload modes from On-demand through Maximum (up to 30 cached pages)
+- **Text search** — full-document search with match-case and whole-word options
+- **Bookmarks** — per-document page bookmarks persisted in browser storage
+- **Zoom and rotation** — per-tab zoom (Ctrl+/Ctrl−) and page rotation
+- **Print** — LitheXPDF page selector (current, all, or range up to 10,000 pages) then Windows printer dialog
+- **Recent files** — quick access to previously opened documents
+- **Dark and light themes** — follows system preference or switch manually
+- **Windows file association** — set LitheXPDF as the system default PDF handler
 
-PDFium integration currently uses a specific `pdfium-render` and PDFium pairing. Compatibility beyond the calls verified so far, and reliable setup on a clean machine, still need validation. See the [testing plan](docs/TESTING.md) for current checks and release gates.
+---
+
+## How it works
+
+LitheXPDF runs three processes:
+
+1. **TypeScript UI** — renders the tab strip, viewer, and all dialogs in a WebView2 window
+2. **Rust host** (`src-tauri`) — handles window management, Tauri commands, and coordinates with the worker
+3. **PDFium worker** (`crates/pdfium-worker`) — a separate sidecar process that owns the PDFium library; communicates with the host over a binary IPC protocol
+
+Only one PDF document is open in the PDFium worker at any time. Background tabs hold path and view state only — they add no rendering cost. When you switch tabs the previous document is closed in the worker and the new one is opened.
+
+---
 
 ## Technology
 
-- Rust stable and Tauri 2 for the desktop host
-- Vanilla TypeScript, HTML, and CSS for the interface
-- A separate Rust worker for PDFium operations
-- Bounded, versioned binary messages between the host and worker
+| Layer | Stack |
+|---|---|
+| Desktop shell | [Tauri 2](https://tauri.app) + WebView2 |
+| PDF rendering | [PDFium](https://pdfium.googlesource.com/pdfium/) via [pdfium-render](https://github.com/ajrcarey/pdfium-render) |
+| Host language | Rust stable |
+| Frontend | Vanilla TypeScript, HTML, CSS — no framework |
+| Build tooling | Vite 6, pnpm 12 |
 
-The frontend does not call PDFium directly; the Rust side owns document lifecycle and rendering.
+---
 
-Bookmarks store only page numbers and labels in the WebView's local storage,
-under a key derived from a normalized document path. The hash is an identifier,
-not encryption. Theme preference is also stored locally. Neither feature stores
-PDF contents or rendered page images.
+## Requirements
 
-## Development setup
+- Windows 10 or Windows 11, 64-bit
+- [WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) (included on Windows 11; downloadable for Windows 10)
+- [Visual C++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist) (usually already present)
 
-This project targets Windows. To work on the desktop app, install Node.js, pnpm, stable Rust with the MSVC target, Visual Studio C++ Build Tools and Windows SDK, and WebView2. See the [Tauri Windows prerequisites](https://v2.tauri.app/start/prerequisites/) for the current platform requirements.
+---
 
-From the repository root:
+## Install
+
+Download the latest MSI from the [Releases](https://github.com/FahadiF/LitheXPDF/releases) page and run the installer.
+
+> [!NOTE]
+> Releases are currently unsigned. Windows SmartScreen may show a warning on first run — click **More info → Run anyway** to proceed. This will resolve once the project obtains a code-signing certificate.
+
+---
+
+## Build from source
+
+**Prerequisites:** Rust stable toolchain, Node.js 18+, pnpm 12+, `x86_64-pc-windows-msvc` Rust target.
 
 ```powershell
-pnpm install --frozen-lockfile
-pnpm worker:build:windows
-pnpm worker:stage:windows
+# Clone
+git clone https://github.com/FahadiF/LitheXPDF.git
+cd LitheXPDF
+
+# Install frontend dependencies
+pnpm install
+
+# Build and stage the PDFium worker (required before tauri dev or build)
+pnpm worker:build:x64
+pnpm worker:stage:x64
+
+# Start development mode
 pnpm tauri dev
+
+# Produce a release MSI
+pnpm release:msi:x64
 ```
 
-To build a Windows x64 MSI after completing manual release checks, use
-`pnpm release:msi` from Windows with the MSVC Rust toolchain and the VBSCRIPT
-Windows optional feature enabled. The Tauri CLI can download and validate WiX
-Toolset v3 when it is not installed. The script builds and stages the worker
-before asking Tauri to create an MSI. A locally built MSI still requires
-clean-machine installation and PDFium smoke tests before publication.
+The PDFium DLL (`src-tauri/resources/pdfium/pdfium.dll`) is not included in the repository. Download a prebuilt Windows x64 binary from [bblanchon/pdfium-binaries](https://github.com/bblanchon/pdfium-binaries/releases) and place it at that path before building.
 
-The worker build and staging commands prepare the Windows x64 sidecar. PDFium runtime compatibility and clean-machine packaging are still being validated, so the development commands do not imply that a distributable build is ready.
+---
 
-Useful checks:
+## Keyboard shortcuts
 
-```powershell
-pnpm typecheck
-pnpm test
-pnpm build
-cargo check --workspace --all-targets
-cargo test --workspace
-```
+| Action | Shortcut |
+|---|---|
+| Open PDF | Ctrl+O |
+| New tab | Ctrl+T |
+| Close tab | Ctrl+W |
+| Next tab | Ctrl+Tab |
+| Previous tab | Ctrl+Shift+Tab |
+| Zoom in | Ctrl++ |
+| Zoom out | Ctrl+− |
+| Print | Ctrl+P |
+| Previous page | ← |
+| Next page | → |
+| Help | F1 |
 
-## Project notes
+---
 
-- [Architecture](docs/ARCHITECTURE.md) — document and worker ownership, tab states, and recovery
-- [Memory policy](docs/MEMORY_POLICY.md) — proposed memory limits and measurement approach; targets are not results
-- [Render protocol](docs/RENDER_PROTOCOL.md) — message bounds, generations, and stale-result handling
-- [Testing plan](docs/TESTING.md) — completed checks, open issues, and acceptance criteria
-- [Roadmap to 1.0.0](docs/ROADMAP_1.0.md) — stabilization, annotations, rendering measurements, x86, signing, and release gates
-- [Release notes](docs/RELEASE_NOTES.md) — current preview release summary
-- [Architecture decisions](docs/adr/) — recorded design decisions
-- [Security policy](SECURITY.md) — supported versions and private vulnerability reporting
+## Documentation
 
-The memory and speed goal will need representative benchmarks before the project can claim that it meets it.
+- [Architecture](docs/ARCHITECTURE.md) — process model, IPC protocol, memory policy
+- [Render protocol](docs/RENDER_PROTOCOL.md) — binary frame format between host and worker
+- [Memory policy](docs/MEMORY_POLICY.md) — cache limits and eviction rules
+- [Testing](docs/TESTING.md) — test plan and release gates
+- [Roadmap](docs/ROADMAP_1.0.md) — planned features and milestones
+
+---
 
 ## License
 
-LitheXPDF project source is licensed under the [MIT License](LICENSE). The bundled PDFium runtime is a separate third-party component with its own notices in `src-tauri/resources/pdfium/THIRD_PARTY_NOTICES.txt`.
+MIT — see [LICENSE](LICENSE) for details.
+
+PDFium is used under the BSD 3-Clause License. See [`src-tauri/resources/pdfium/THIRD_PARTY_NOTICES.txt`](src-tauri/resources/pdfium/THIRD_PARTY_NOTICES.txt).
