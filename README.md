@@ -1,6 +1,6 @@
 # LitheXPDF
 
-A fast, lightweight Windows PDF reader built with Rust, Tauri 2, TypeScript, and PDFium. Open dozens of documents in tabs while keeping memory use low — only the active document is fully rendered; every other tab holds just its path and last-read position.
+A fast, lightweight PDF reader built with Rust, Tauri 2, TypeScript, and PDFium. Open dozens of documents in tabs while keeping memory use low.
 
 <img width="1106" height="694" alt="LitheXPDF reader with dark theme" src="https://github.com/user-attachments/assets/ea50296f-ac00-428c-96e1-b8a7c77d8d5d" />
 
