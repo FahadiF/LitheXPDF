@@ -203,6 +203,11 @@ fn show_in_explorer(path: String) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     Ok(())
 }
+
+#[tauri::command]
+fn get_app_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
 fn resolve_pdfium_path(app: &tauri::AppHandle) -> Result<PathBuf, Box<dyn std::error::Error>> {
     #[cfg(debug_assertions)]
     let path = {
@@ -236,7 +241,8 @@ pub fn run() {
             cancel_render,
             close_pdf,
             get_text_layer,
-            show_in_explorer
+            show_in_explorer,
+            get_app_version
         ])
         .build(tauri::generate_context!())
         .expect("failed to build LitheXPDF desktop host");

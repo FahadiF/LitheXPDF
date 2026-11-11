@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { parseRenderResponse, PdfReaderUi, type ReaderBridge } from "./reader";
+import { parseRenderResponse, PdfReaderUi, type ReaderBridge, coalesceTextSpans, mergeLineRects } from "./reader";
 import { LocalBookmarkStore, type Bookmark, type BookmarkStore } from "./bookmarks";
 import { installThemeToggle } from "./theme";
 
@@ -650,5 +650,53 @@ describe("theme preference", () => {
     expect(key).not.toContain("Research");
     expect(JSON.parse(value)).toEqual([{ pageNumber: 9, label: "Page 9" }]);
     expect(await store.load("c:/documents/research.PDF")).toEqual([{ pageNumber: 9, label: "Page 9" }]);
+  });
+});
+
+describe("text selection and coalescing", () => {
+  it("coalesces adjacent character spans into word spans with natural spaces", () => {
+    // "REST APIs"
+    const rawSpans = [
+      { t: "R", x: 10, y: 20, w: 8, h: 14 },
+      { t: "E", x: 18, y: 20, w: 7, h: 14 },
+      { t: "S", x: 25, y: 20, w: 7, h: 14 },
+      { t: "T", x: 32, y: 20, w: 8, h: 14 },
+      // gap for space
+      { t: "A", x: 48, y: 20, w: 8, h: 14 },
+      { t: "P", x: 56, y: 20, w: 7, h: 14 },
+      { t: "I", x: 63, y: 20, w: 4, h: 14 },
+      { t: "s", x: 67, y: 20, w: 6, h: 14 },
+    ];
+    const coalesced = coalesceTextSpans(rawSpans);
+    expect(coalesced.length).toBe(2);
+    expect(coalesced[0]!.t).toBe("REST ");
+    expect(coalesced[0]!.x).toBe(10);
+    expect(coalesced[0]!.w).toBe(38); // 48 - 10
+    expect(coalesced[1]!.t).toBe("APIs");
+    expect(coalesced[1]!.x).toBe(48);
+    expect(coalesced[1]!.w).toBe(25); // 73 - 48
+  });
+
+  it("merges adjacent rects on the same line into a single continuous highlight box", () => {
+    const slotRect = { left: 100, top: 100, right: 600, bottom: 800, width: 500, height: 700 } as DOMRect;
+    const clientRects = [
+      { left: 150, top: 120, right: 180, bottom: 136, width: 30, height: 16 } as DOMRect,
+      { left: 180, top: 120, right: 220, bottom: 136, width: 40, height: 16 } as DOMRect,
+      { left: 228, top: 120, right: 270, bottom: 136, width: 42, height: 16 } as DOMRect,
+      // next line
+      { left: 150, top: 142, right: 210, bottom: 158, width: 60, height: 16 } as DOMRect,
+    ];
+    const merged = mergeLineRects(clientRects, slotRect);
+    expect(merged.length).toBe(2);
+    // Line 1: merged from 150 to 270 relative to slotRect.left(100) -> x: 50, w: 120
+    expect(merged[0]!.x).toBe(50);
+    expect(merged[0]!.y).toBe(20);
+    expect(merged[0]!.w).toBe(120);
+    expect(merged[0]!.h).toBe(16);
+    // Line 2: x: 50, y: 42, w: 60, h: 16
+    expect(merged[1]!.x).toBe(50);
+    expect(merged[1]!.y).toBe(42);
+    expect(merged[1]!.w).toBe(60);
+    expect(merged[1]!.h).toBe(16);
   });
 });

@@ -29,7 +29,7 @@ const DEFAULT_PDF_STARTUP_PROMPT_KEY = "lithexpdf.defaultPdfStartupPrompt.v1";
 const DEFAULT_PDF_FIRST_RUN_SEEN_KEY = "lithexpdf.defaultPdfFirstRunSeen.v1";
 const SESSION_RESTORE_KEY = "lithexpdf.sessionRestore.v1";
 const SESSION_TABS_KEY = "lithexpdf.sessionTabs.v1";
-const APP_VERSION = "0.1.1";
+const APP_VERSION = "0.2.0";
 const MAX_TEXT_LAYER_BYTES = 60 * 1024;
 
 type RenderMode = "current" | "nearby" | "balanced" | "maximum";
@@ -217,6 +217,7 @@ export class PdfReaderUi {
   private queuedSearch?: { sequence: number; documentId: string; generation: number; query: string; matchCase: boolean; wholeWord: boolean };
   private readonly textLayerCache = new Map<number, TextSpan[]>();
   private readonly textLayerPending = new Set<number>();
+  private selectionOverlayRafId: number | null = null;
 
   constructor(private readonly root: ParentNode, private readonly bridge: ReaderBridge) {
     this.bootstrapImage = this.required("#page-image");
@@ -275,7 +276,14 @@ export class PdfReaderUi {
     this.printRangeEnd = this.required<HTMLInputElement>("#print-range-end");
     this.printError = this.required("#print-error");
     const versionElement = this.optional("#app-version");
-    if (versionElement) versionElement.textContent = APP_VERSION;
+    if (versionElement) {
+      versionElement.textContent = APP_VERSION;
+      void this.bridge.invoke<string>("get_app_version")
+        .then((ver: string) => {
+          if (versionElement && ver) versionElement.textContent = ver;
+        })
+        .catch(() => {});
+    }
     this.openButton.addEventListener("click", () => void this.openPicker());
     this.closeButton.addEventListener("click", () => void this.close());
     this.newTabButton?.addEventListener("click", () => void this.openPicker());
@@ -384,6 +392,13 @@ export class PdfReaderUi {
       this.handleTabContextAction(btn.dataset.action!, this.tabContextMenu.dataset.tabId);
     });
     this.tabContextMenu?.addEventListener("pointerdown", (e) => e.stopPropagation());
+    this.appDocument().addEventListener("selectionchange", () => this.scheduleSelectionOverlayUpdate());
+    this.viewer.addEventListener("pointermove", (e) => {
+      if ((e as PointerEvent).buttons === 1) this.scheduleSelectionOverlayUpdate();
+    });
+    this.appDocument().addEventListener("pointerup", () => this.updateSelectionOverlay());
+    this.viewer.addEventListener("scroll", () => this.scheduleSelectionOverlayUpdate(), { passive: true });
+    this.appDocument().defaultView?.addEventListener("resize", () => this.scheduleSelectionOverlayUpdate());
   }
 
   private optional<T extends HTMLElement = HTMLElement>(selector: string): T | null {
@@ -1061,6 +1076,7 @@ export class PdfReaderUi {
     this.cancelCurrentRender();
     this.clearPrefetchState();
     this.clearImage();
+    this.clearSelectionOverlay();
     this.current = undefined;
     this.currentPath = undefined;
     this.activeTabId = tabId;
@@ -1714,6 +1730,7 @@ export class PdfReaderUi {
     ++this.renderToken;
     this.cancelCurrentRender();
     this.clearPrefetchState();
+    this.clearSelectionOverlay();
     this.current = undefined;
     this.currentPath = undefined;
     this.bookmarks = [];
@@ -1824,7 +1841,8 @@ export class PdfReaderUi {
             pageIndex,
           });
           if (this.current?.document_id !== doc.document_id || this.current.generation !== doc.generation) return;
-          spans = parseTextLayerBuffer(buffer);
+          const rawSpans = parseTextLayerBuffer(buffer);
+          spans = coalesceTextSpans(rawSpans);
           this.textLayerCache.set(pageIndex, spans);
         } catch {
           return;
@@ -1854,8 +1872,104 @@ export class PdfReaderUi {
         layer.appendChild(el);
       }
       slot.appendChild(layer);
+
+      if (!slot.querySelector(".selection-layer")) {
+        const selLayer = document.createElement("div");
+        selLayer.className = "selection-layer";
+        selLayer.setAttribute("aria-hidden", "true");
+        slot.appendChild(selLayer);
+      }
     } finally {
       this.textLayerPending.delete(pageIndex);
+    }
+  }
+
+  private clearSelectionOverlay(): void {
+    if (this.selectionOverlayRafId !== null) {
+      cancelAnimationFrame(this.selectionOverlayRafId);
+      this.selectionOverlayRafId = null;
+    }
+    this.viewer.querySelectorAll(".selection-layer").forEach((layer) => layer.replaceChildren());
+  }
+
+  private scheduleSelectionOverlayUpdate(): void {
+    if (this.selectionOverlayRafId !== null) return;
+    this.selectionOverlayRafId = requestAnimationFrame(() => {
+      this.selectionOverlayRafId = null;
+      this.updateSelectionOverlay();
+    });
+  }
+
+  private updateSelectionOverlay(): void {
+    const doc = this.appDocument();
+    const selection = doc.getSelection();
+    if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+      this.clearSelectionOverlay();
+      return;
+    }
+
+    const range = selection.getRangeAt(0);
+    const startNode = range.startContainer;
+    const endNode = range.endContainer;
+    const startSlot = (startNode instanceof Element ? startNode : startNode.parentElement)?.closest<HTMLElement>(".page-slot");
+    const endSlot = (endNode instanceof Element ? endNode : endNode.parentElement)?.closest<HTMLElement>(".page-slot");
+    if (!startSlot && !endSlot) {
+      this.clearSelectionOverlay();
+      return;
+    }
+
+    const clientRects = range.getClientRects();
+    if (!clientRects || clientRects.length === 0) {
+      this.clearSelectionOverlay();
+      return;
+    }
+
+    // Clear existing selection rects
+    this.viewer.querySelectorAll(".selection-layer").forEach((layer) => layer.replaceChildren());
+
+    for (let i = 0; i < this.pageSlots.length; i++) {
+      const slot = this.pageSlots[i];
+      if (!slot) continue;
+      const slotRect = slot.getBoundingClientRect();
+      if (slotRect.width <= 0 || slotRect.height <= 0) continue;
+
+      // Filter client rects intersecting this slot
+      const slotRects: DOMRect[] = [];
+      for (let r = 0; r < clientRects.length; r++) {
+        const cr = clientRects[r]!;
+        if (cr.width <= 0 || cr.height <= 0) continue;
+        if (
+          cr.bottom > slotRect.top + 0.5 &&
+          cr.top < slotRect.bottom - 0.5 &&
+          cr.right > slotRect.left + 0.5 &&
+          cr.left < slotRect.right - 0.5
+        ) {
+          slotRects.push(cr);
+        }
+      }
+
+      if (slotRects.length === 0) continue;
+
+      const merged = mergeLineRects(slotRects, slotRect);
+      if (merged.length === 0) continue;
+
+      let layer = slot.querySelector<HTMLElement>(".selection-layer");
+      if (!layer) {
+        layer = doc.createElement("div");
+        layer.className = "selection-layer";
+        layer.setAttribute("aria-hidden", "true");
+        slot.appendChild(layer);
+      }
+
+      for (const m of merged) {
+        const div = doc.createElement("div");
+        div.className = "selection-rect";
+        div.style.left = m.x.toFixed(2) + "px";
+        div.style.top = m.y.toFixed(2) + "px";
+        div.style.width = m.w.toFixed(2) + "px";
+        div.style.height = m.h.toFixed(2) + "px";
+        layer.appendChild(div);
+      }
     }
   }
 }
@@ -1984,6 +2098,96 @@ function parseTextLayerBuffer(buffer: ArrayBuffer): TextSpan[] {
     }
   }
   return spans;
+}
+
+export function coalesceTextSpans(rawSpans: TextSpan[]): TextSpan[] {
+  if (rawSpans.length <= 1) return rawSpans;
+  const result: TextSpan[] = [];
+  let current: TextSpan = { ...rawSpans[0]! };
+
+  for (let i = 1; i < rawSpans.length; i++) {
+    const next = rawSpans[i]!;
+    const verticalDiff = Math.abs(next.y - current.y);
+    const minH = Math.min(current.h, next.h);
+    const sameLine = verticalDiff <= minH * 0.35;
+    const gap = next.x - (current.x + current.w);
+
+    const isCurrentSpace = current.t === " " || current.t.endsWith(" ");
+    const isNextSpace = next.t === " " || next.t.startsWith(" ");
+    const isNormalWordGap = gap >= -1.5 && gap <= Math.max(2.0, current.h * 0.22);
+
+    if (sameLine && !isCurrentSpace && !isNextSpace && isNormalWordGap) {
+      current.t += next.t;
+      current.w = (next.x + next.w) - current.x;
+      current.h = Math.max(current.h, next.h);
+    } else {
+      if (sameLine && gap > Math.max(2.0, current.h * 0.22) && !isCurrentSpace && !isNextSpace) {
+        current.t += " ";
+        current.w = Math.max(current.w, next.x - current.x);
+      }
+      result.push(current);
+      current = { ...next };
+    }
+  }
+  result.push(current);
+  return result;
+}
+
+export interface LocalRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export function mergeLineRects(clientRects: DOMRect[], slotRect: DOMRect): LocalRect[] {
+  if (clientRects.length === 0) return [];
+  const raw: LocalRect[] = clientRects
+    .map((cr) => ({
+      x: cr.left - slotRect.left,
+      y: cr.top - slotRect.top,
+      w: cr.width,
+      h: cr.height,
+    }))
+    .filter((r) => r.w > 0 && r.h > 0);
+
+  if (raw.length === 0) return [];
+
+  // Sort by Y first (bucketed to text line height), then X
+  raw.sort((a, b) => {
+    const minH = Math.min(a.h, b.h);
+    if (Math.abs(a.y - b.y) > minH * 0.4) {
+      return a.y - b.y;
+    }
+    return a.x - b.x;
+  });
+
+  const merged: LocalRect[] = [];
+  let current: LocalRect = { ...raw[0]! };
+
+  for (let i = 1; i < raw.length; i++) {
+    const next = raw[i]!;
+    const vOverlap = Math.min(current.y + current.h, next.y + next.h) - Math.max(current.y, next.y);
+    const minH = Math.min(current.h, next.h);
+    const isSameLine = vOverlap >= minH * 0.4;
+    const maxGap = Math.max(20, current.h * 1.6);
+    const isHorizontalAdjacent = next.x <= current.x + current.w + maxGap;
+
+    if (isSameLine && isHorizontalAdjacent) {
+      const right = Math.max(current.x + current.w, next.x + next.w);
+      const top = Math.min(current.y, next.y);
+      const bottom = Math.max(current.y + current.h, next.y + next.h);
+      current.x = Math.min(current.x, next.x);
+      current.y = top;
+      current.w = right - current.x;
+      current.h = bottom - top;
+    } else {
+      merged.push(current);
+      current = { ...next };
+    }
+  }
+  merged.push(current);
+  return merged;
 }
 function targetDimensions(cssWidth: number, pageWidth: number, pageHeight: number): [number, number] {
   const width = Number.isFinite(cssWidth) && cssWidth > 0 ? cssWidth : 1000;
