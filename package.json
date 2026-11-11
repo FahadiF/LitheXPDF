@@ -2,7 +2,7 @@
   "name": "lithexpdf",
   "private": true,
   "version": "0.2.0",
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "description": "Early-stage Windows PDF reader built with Rust, Tauri 2, TypeScript, and PDFium",
   "packageManager": "pnpm@12.18.0",
   "scripts": {
@@ -17,6 +17,7 @@
     "worker:build:x86": "cargo build --release --target i686-pc-windows-msvc -p pdfium-worker",
     "worker:stage:x64": "node scripts/stage-worker-x64.mjs",
     "worker:stage:x86": "node scripts/stage-worker-x86.mjs",
+    "release:msi": "pnpm release:msi:x64",
     "release:msi:x64": "pnpm worker:build:x64 && pnpm worker:stage:x64 && pnpm tauri build --target x86_64-pc-windows-msvc --bundles msi",
     "release:msi:x86": "pnpm worker:build:x86 && pnpm worker:stage:x86 && pnpm tauri build --target i686-pc-windows-msvc --bundles msi"
   },

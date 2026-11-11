@@ -163,6 +163,6 @@ pnpm release:msi:x86
 
 ## License
 
-MIT — see [LICENSE](LICENSE) for details.
+GNU General Public License v3.0 (GPLv3) — see [LICENSE](LICENSE) for details.
 
 PDFium is used under the BSD 3-Clause License. See [`src-tauri/resources/pdfium/THIRD_PARTY_NOTICES.txt`](src-tauri/resources/pdfium/THIRD_PARTY_NOTICES.txt).

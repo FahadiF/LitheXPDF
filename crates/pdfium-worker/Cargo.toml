@@ -2,7 +2,7 @@
 name = "pdfium-worker"
 version = "0.2.0"
 description = "LitheXPDF isolated PDFium worker"
-license = "MIT"
+license = "GPL-3.0-or-later"
 edition = "2021"
 rust-version = "1.90"
 
