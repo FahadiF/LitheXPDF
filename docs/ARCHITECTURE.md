@@ -66,12 +66,11 @@ stdout/stderr continuously and parse arbitrary stdout chunks with the frame
 decoder; do not use the plugin's whole-output collection method for this
 persistent binary stream.
 
-From the repository root, build the worker with
-`cargo build --release --target x86_64-pc-windows-msvc -p pdfium-worker`.
-The artifact is `target/x86_64-pc-windows-msvc/release/pdfium-worker.exe`;
-stage it as
-`src-tauri/binaries/pdfium-worker-x86_64-pc-windows-msvc.exe` before the Tauri
-package step. This is the only initially supported Windows package target.
+From the repository root, build and package the worker and installer using the
+provided scripts:
+
+- **64-bit (x64):** `pnpm release:msi:x64` (builds worker for `x86_64-pc-windows-msvc`, stages worker and x64 `pdfium.dll`, and produces the x64 MSI).
+- **32-bit (x86):** `pnpm release:msi:x86` (builds worker for `i686-pc-windows-msvc`, stages worker and x86 `pdfium.dll`, and produces the x86 MSI).
 
 Bundle the pinned `pdfium.dll` and its redistribution notices from
 `src-tauri/resources/pdfium/` as Tauri resources. The host resolves

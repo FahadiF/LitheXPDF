@@ -1,8 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <?if $(sys.BUILDARCH)="x86"?>
+    <?define Win64 = "no" ?>
+  <?else?>
+    <?define Win64 = "yes" ?>
+  <?endif?>
   <Fragment>
     <DirectoryRef Id="TARGETDIR">
-      <Component Id="LitheXPDFAssociationRegistration" Guid="*" Win64="yes">
+      <Component Id="LitheXPDFAssociationRegistration" Guid="*" Win64="$(var.Win64)">
         <RegistryKey Root="HKLM" Key="Software\Classes\LitheXPDF.PDF" Action="createAndRemoveOnUninstall">
           <RegistryValue Type="string" Value="LitheXPDF PDF Document" KeyPath="yes" />
           <RegistryValue Type="string" Name="FriendlyTypeName" Value="LitheXPDF PDF Document" />
