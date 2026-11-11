@@ -33,6 +33,10 @@ jobs:
           pnpm typecheck
           pnpm test
           pnpm build
+      - name: Stage x64 worker sidecar for Rust checks
+        run: |
+          pnpm worker:build:x64
+          pnpm worker:stage:x64
       - name: Rust checks
         run: |
           cargo fmt --all -- --check
