@@ -5,7 +5,7 @@ use image::ImageEncoder;
 use pdfium_protocol::{
     encode, parse_header, read_u16, read_u32, read_u64, validate_bitmap, Frame, Kind,
     MAX_CONTROL_PAYLOAD, MAX_IMAGE_BYTES, MAX_SEARCH_EXCERPT_BYTES, MAX_SEARCH_QUERY_BYTES,
-    MAX_SEARCH_RESULTS, OPEN_ACK_LEN,
+    MAX_SEARCH_RESULTS, MAX_TEXT_LAYER_BYTES, OPEN_ACK_LEN,
 };
 use pdfium_render::prelude::{
     PdfDocument, PdfRenderConfig, PdfSearchDirection, PdfSearchOptions, Pdfium,
@@ -133,6 +133,7 @@ impl WorkerSession {
             Kind::Search => self.search(payload),
             Kind::Print => self.print(payload),
             Kind::Close => self.close(payload),
+            Kind::GetTextLayer => self.get_text_layer(payload),
             _ => Err((2, format!("message kind {kind:?} is not a worker request"))),
         }
     }
@@ -470,6 +471,83 @@ impl WorkerSession {
         self.document.take();
         self.identity = None;
         Ok((Kind::Ack, payload.to_vec()))
+    }
+
+    fn get_text_layer(&mut self, payload: &[u8]) -> Result<(Kind, Vec<u8>), (u16, String)> {
+        const REQUEST_LEN: usize = 28; // tab_id(16) + generation(8) + page_index(4)
+        if payload.len() != REQUEST_LEN {
+            return Err((4, "GET_TEXT_LAYER payload must be 28 bytes".into()));
+        }
+        let tab_id: [u8; 16] = payload[..16]
+            .try_into()
+            .map_err(|_| (4, "invalid tab identifier".into()))?;
+        let generation = read_u64(payload, 16).map_err(protocol_err)?;
+        let page_index = read_u32(payload, 24).map_err(protocol_err)?;
+        if self.identity != Some((tab_id, generation)) {
+            return Err((6, "GET_TEXT_LAYER does not match the active document".into()));
+        }
+        let document = self
+            .document
+            .as_ref()
+            .ok_or_else(|| (6, "no document is open".into()))?;
+        if page_index >= document.pages().len() as u32 || page_index > i32::MAX as u32 {
+            return Err((4, "page index is out of range".into()));
+        }
+        let page = document
+            .pages()
+            .get(page_index as i32)
+            .map_err(|e| (7, format!("could not open page {page_index}: {e}")))?;
+        let page_height = page.height().value; // PDF user-space points, y=0 at bottom
+        let text_page = page
+            .text()
+            .map_err(|e| (7, format!("could not get text layer for page {page_index}: {e}")))?;
+
+        // Binary encoding per span:
+        //   x:        f32 BE  (4 bytes) — left edge in PDF points
+        //   y:        f32 BE  (4 bytes) — top edge, CSS-flipped (page_height - pdf_top)
+        //   w:        f32 BE  (4 bytes) — width in PDF points
+        //   h:        f32 BE  (4 bytes) — height in PDF points
+        //   text_len: u16 BE  (2 bytes) — byte length of the following UTF-8 string
+        //   text:     [u8]    (text_len bytes)
+        // Response prefix: u32 BE span count.
+        let chars = text_page.chars();
+        let mut spans: Vec<(f32, f32, f32, f32, String)> = Vec::new();
+        for ch in chars.iter() {
+            let unicode = match ch.unicode_char() {
+                Some(c) if c != '\0' && c != '\r' && c != '\n' => c,
+                _ => continue,
+            };
+            if let Ok(bounds) = ch.loose_bounds() {
+                let x = bounds.left().value;
+                let pdf_top = bounds.top().value;
+                let y = page_height - pdf_top;
+                let w = (bounds.right().value - bounds.left().value).max(0.5);
+                let h = (pdf_top - bounds.bottom().value).max(0.5);
+                spans.push((x, y, w, h, unicode.to_string()));
+            }
+        }
+
+        // Encode to binary, truncating at the byte limit.
+        let mut response = Vec::with_capacity(4 + spans.len() * 20);
+        response.extend_from_slice(&(spans.len() as u32).to_be_bytes());
+        let mut written_spans: u32 = 0;
+        for (x, y, w, h, text) in &spans {
+            let text_bytes = text.as_bytes();
+            let entry_len = 4 + 4 + 4 + 4 + 2 + text_bytes.len();
+            if response.len() + entry_len > MAX_TEXT_LAYER_BYTES {
+                break;
+            }
+            response.extend_from_slice(&x.to_be_bytes());
+            response.extend_from_slice(&y.to_be_bytes());
+            response.extend_from_slice(&w.to_be_bytes());
+            response.extend_from_slice(&h.to_be_bytes());
+            response.extend_from_slice(&(text_bytes.len() as u16).to_be_bytes());
+            response.extend_from_slice(text_bytes);
+            written_spans += 1;
+        }
+        // Patch the span count at offset 0 to reflect how many actually fit.
+        response[0..4].copy_from_slice(&written_spans.to_be_bytes());
+        Ok((Kind::TextLayer, response))
     }
 }
 

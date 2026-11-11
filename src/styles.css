@@ -811,3 +811,31 @@ kbd { padding: 2px 5px; border: 1px solid #46535a; border-radius: 3px; backgroun
 :root[data-theme="light"] .tab-ctx-item { color: #2a3439; }
 :root[data-theme="light"] .tab-ctx-item:hover:not(:disabled) { background: #f0f5f7; color: #0f1b1f; }
 :root[data-theme="light"] .tab-ctx-sep { background: #dbe2e5; }
+
+/* -----------------------------------------------------------
+   Text selection overlay
+   ----------------------------------------------------------- */
+.page-slot {
+  position: relative;
+}
+.text-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+  line-height: 1;
+}
+.text-layer span {
+  position: absolute;
+  color: transparent;
+  cursor: text;
+  pointer-events: auto;
+  user-select: text;
+  white-space: pre;
+  transform-origin: 0 0;
+}
+.text-layer span::selection {
+  background: rgba(66, 135, 245, 0.35);
+  color: transparent;
+}

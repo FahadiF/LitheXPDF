@@ -30,6 +30,7 @@ const DEFAULT_PDF_FIRST_RUN_SEEN_KEY = "lithexpdf.defaultPdfFirstRunSeen.v1";
 const SESSION_RESTORE_KEY = "lithexpdf.sessionRestore.v1";
 const SESSION_TABS_KEY = "lithexpdf.sessionTabs.v1";
 const APP_VERSION = "0.1.1";
+const MAX_TEXT_LAYER_BYTES = 60 * 1024;
 
 type RenderMode = "current" | "nearby" | "balanced" | "maximum";
 type PageRotation = 0 | 90 | 180 | 270;
@@ -62,6 +63,8 @@ interface CachedPageImage {
   decodedBytes: number;
   loaded: boolean;
 }
+
+interface TextSpan { t: string; x: number; y: number; w: number; h: number; }
 
 export interface OpenPdfResult {
   document_id: string;
@@ -212,6 +215,8 @@ export class PdfReaderUi {
   private searchSequence = 0;
   private searchRunning = false;
   private queuedSearch?: { sequence: number; documentId: string; generation: number; query: string; matchCase: boolean; wholeWord: boolean };
+  private readonly textLayerCache = new Map<number, TextSpan[]>();
+  private readonly textLayerPending = new Set<number>();
 
   constructor(private readonly root: ParentNode, private readonly bridge: ReaderBridge) {
     this.bootstrapImage = this.required("#page-image");
@@ -1469,6 +1474,7 @@ export class PdfReaderUi {
       if (!isCurrentRequest()) return;
       this.activatePageImage(index, cached);
       this.applyImageRotation(cached.image, index);
+      void this.fetchAndRenderTextLayer(index, doc);
       if (cached.loaded) {
         this.loading.hidden = true;
         this.status.textContent = "Ready";
@@ -1804,7 +1810,56 @@ export class PdfReaderUi {
     this.bookmarkButton.title = currentIsBookmarked ? "Remove bookmark" : "Bookmark current page";
     this.openButton.disabled = false;
   }
+
+  private async fetchAndRenderTextLayer(pageIndex: number, doc: OpenPdfResult): Promise<void> {
+    if (this.textLayerPending.has(pageIndex)) return;
+    this.textLayerPending.add(pageIndex);
+    try {
+      let spans = this.textLayerCache.get(pageIndex);
+      if (!spans) {
+        try {
+          const buffer = await this.bridge.invoke<ArrayBuffer>("get_text_layer", {
+            documentId: doc.document_id,
+            generation: doc.generation,
+            pageIndex,
+          });
+          if (this.current?.document_id !== doc.document_id || this.current.generation !== doc.generation) return;
+          spans = parseTextLayerBuffer(buffer);
+          this.textLayerCache.set(pageIndex, spans);
+        } catch {
+          return;
+        }
+      }
+      if (!spans.length) return;
+      if (this.current?.document_id !== doc.document_id || this.current.generation !== doc.generation) return;
+      const slot = this.pageSlots[pageIndex];
+      if (!slot) return;
+      const slotW = slot.clientWidth;
+      const slotH = slot.clientHeight;
+      if (slotW <= 0 || slotH <= 0) return;
+      const scaleX = slotW / doc.page_width_points;
+      const scaleY = slotH / doc.page_height_points;
+      slot.querySelectorAll(".text-layer").forEach((el) => el.remove());
+      const layer = document.createElement("div");
+      layer.className = "text-layer";
+      layer.setAttribute("aria-hidden", "true");
+      for (const span of spans) {
+        const el = document.createElement("span");
+        el.textContent = span.t;
+        el.style.left = (span.x * scaleX).toFixed(2) + "px";
+        el.style.top = (span.y * scaleY).toFixed(2) + "px";
+        el.style.width = (span.w * scaleX).toFixed(2) + "px";
+        el.style.height = (span.h * scaleY).toFixed(2) + "px";
+        el.style.fontSize = (span.h * scaleY).toFixed(2) + "px";
+        layer.appendChild(el);
+      }
+      slot.appendChild(layer);
+    } finally {
+      this.textLayerPending.delete(pageIndex);
+    }
+  }
 }
+
 
 function normalizeLocalPath(path: string): string {
   return path.toLowerCase().replaceAll("/", String.fromCharCode(92));
@@ -1905,6 +1960,31 @@ function uuidBytes(value: string): Uint8Array {
   return Uint8Array.from(normalized.match(/../g)!, (byte) => Number.parseInt(byte, 16));
 }
 
+function parseTextLayerBuffer(buffer: ArrayBuffer): TextSpan[] {
+  if (!buffer || buffer.byteLength < 4) return [];
+  if (buffer.byteLength > MAX_TEXT_LAYER_BYTES) return [];
+  const view = new DataView(buffer);
+  const count = view.getUint32(0, false); // big-endian
+  const spans: TextSpan[] = [];
+  const decoder = new TextDecoder("utf-8");
+  let offset = 4;
+  for (let i = 0; i < count; i++) {
+    if (offset + 18 > buffer.byteLength) break;
+    const x = view.getFloat32(offset, false);
+    const y = view.getFloat32(offset + 4, false);
+    const w = view.getFloat32(offset + 8, false);
+    const h = view.getFloat32(offset + 12, false);
+    const textLen = view.getUint16(offset + 16, false);
+    offset += 18;
+    if (offset + textLen > buffer.byteLength) break;
+    const t = decoder.decode(new Uint8Array(buffer, offset, textLen));
+    offset += textLen;
+    if (Number.isFinite(x) && Number.isFinite(y) && w > 0 && h > 0 && t.length > 0) {
+      spans.push({ t, x, y, w, h });
+    }
+  }
+  return spans;
+}
 function targetDimensions(cssWidth: number, pageWidth: number, pageHeight: number): [number, number] {
   const width = Number.isFinite(cssWidth) && cssWidth > 0 ? cssWidth : 1000;
   if (!Number.isFinite(pageWidth) || !Number.isFinite(pageHeight) || pageWidth <= 0 || pageHeight <= 0) {

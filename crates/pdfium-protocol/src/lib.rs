@@ -25,13 +25,17 @@ pub enum Kind {
     Shutdown = 0x0004,
     Search = 0x0005,
     Print = 0x0006,
+    GetTextLayer = 0x0007,
     Ready = 0x8001,
     Ack = 0x8002,
     Page = 0x8003,
     SearchResults = 0x8004,
     PrintResult = 0x8005,
+    TextLayer = 0x8006,
     Error = 0x80ff,
 }
+
+pub const MAX_TEXT_LAYER_BYTES: usize = 60 * 1024;
 
 impl TryFrom<u16> for Kind {
     type Error = ProtocolError;
@@ -43,11 +47,13 @@ impl TryFrom<u16> for Kind {
             0x0004 => Ok(Self::Shutdown),
             0x0005 => Ok(Self::Search),
             0x0006 => Ok(Self::Print),
+            0x0007 => Ok(Self::GetTextLayer),
             0x8001 => Ok(Self::Ready),
             0x8002 => Ok(Self::Ack),
             0x8003 => Ok(Self::Page),
             0x8004 => Ok(Self::SearchResults),
             0x8005 => Ok(Self::PrintResult),
+            0x8006 => Ok(Self::TextLayer),
             0x80ff => Ok(Self::Error),
             _ => Err(ProtocolError::UnknownKind(value)),
         }
@@ -125,6 +131,8 @@ fn validate_request_id(kind: Kind, id: u64) -> Result<(), ProtocolError> {
 fn payload_limit(kind: Kind) -> usize {
     if kind == Kind::Page {
         MAX_RESULT_PAYLOAD
+    } else if kind == Kind::TextLayer {
+        MAX_TEXT_LAYER_BYTES
     } else {
         MAX_CONTROL_PAYLOAD
     }
@@ -373,10 +381,10 @@ mod tests {
             (
                 {
                     let mut b = encode(&frame(Kind::Ready, 0, &[])).unwrap();
-                    b[7] = 7;
+                    b[7] = 8;
                     b
                 },
-                ProtocolError::UnknownKind(0x8007),
+                ProtocolError::UnknownKind(0x8008),
             ),
             (
                 {

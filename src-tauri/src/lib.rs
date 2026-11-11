@@ -181,6 +181,28 @@ async fn close_pdf(
     state.close_document(document_id, generation).await
 }
 
+
+#[tauri::command]
+async fn get_text_layer(
+    state: tauri::State<'_, AppState>,
+    document_id: String,
+    generation: u64,
+    page_index: u32,
+) -> Result<tauri::ipc::Response, String> {
+    state
+        .get_text_layer(document_id, generation, page_index)
+        .await
+        .map(tauri::ipc::Response::new)
+}
+
+#[tauri::command]
+fn show_in_explorer(path: String) -> Result<(), String> {
+    std::process::Command::new("explorer")
+        .args(["/select,", &path])
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
 fn resolve_pdfium_path(app: &tauri::AppHandle) -> Result<PathBuf, Box<dyn std::error::Error>> {
     #[cfg(debug_assertions)]
     let path = {
@@ -212,7 +234,9 @@ pub fn run() {
             search_text,
             print_pdf,
             cancel_render,
-            close_pdf
+            close_pdf,
+            get_text_layer,
+            show_in_explorer
         ])
         .build(tauri::generate_context!())
         .expect("failed to build LitheXPDF desktop host");

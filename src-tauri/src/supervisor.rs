@@ -1,7 +1,7 @@
 use pdfium_protocol::{
     encode, read_u16, read_u32, read_u64, validate_bitmap, Decoder, Frame, Kind, MAX_IMAGE_BYTES,
     MAX_RESULT_METADATA, MAX_SEARCH_EXCERPT_BYTES, MAX_SEARCH_QUERY_BYTES, MAX_SEARCH_RESULTS,
-    OPEN_ACK_LEN,
+    MAX_TEXT_LAYER_BYTES, OPEN_ACK_LEN,
 };
 use serde::Serialize;
 use std::{
@@ -546,6 +546,59 @@ impl AppState {
         }
     }
 
+    pub async fn get_text_layer(
+        &self,
+        id: String,
+        generation: u64,
+        page_index: u32,
+    ) -> Result<Vec<u8>, String> {
+        let _operation = self.0.operation.lock().await;
+        let active = self
+            .0
+            .active
+            .lock()
+            .await
+            .clone()
+            .ok_or("No PDF is open")?;
+        if !active_document_matches(Some(&active), &id, generation) {
+            return Err("Document changed; text layer request is stale".into());
+        }
+        if page_index >= active.page_count {
+            return Err("Page index is out of range".into());
+        }
+        let mut payload = Vec::with_capacity(28);
+        payload.extend_from_slice(&active.tab);
+        payload.extend_from_slice(&generation.to_be_bytes());
+        payload.extend_from_slice(&page_index.to_be_bytes());
+        let conn = self.connection().await?;
+        if !active_document_matches(self.0.active.lock().await.as_ref(), &id, generation) {
+            return Err("Document changed before text layer dispatch".into());
+        }
+        let reply = match conn
+            .request(
+                self.request(Kind::GetTextLayer, payload)?,
+                Duration::from_secs(15),
+            )
+            .await
+        {
+            Ok(reply) => reply,
+            Err(error) => {
+                if !conn.alive.load(Ordering::SeqCst) {
+                    self.0.active.lock().await.take();
+                }
+                return Err(error);
+            }
+        };
+        if reply.kind != Kind::TextLayer
+            || reply.payload.len() < 4
+            || reply.payload.len() > MAX_TEXT_LAYER_BYTES
+        {
+            conn.fail("malformed TEXT_LAYER response".into()).await;
+            return Err("Worker returned an invalid text layer response".into());
+        }
+        Ok(reply.payload)
+    }
+
     pub async fn close_document(&self, id: String, generation: u64) -> Result<(), String> {
         self.cancel_all_renders().await;
         let _operation = self.0.operation.lock().await;
@@ -998,6 +1051,7 @@ fn expected_reply(kind: Kind) -> Option<Kind> {
         Kind::Render => Some(Kind::Page),
         Kind::Search => Some(Kind::SearchResults),
         Kind::Print => Some(Kind::PrintResult),
+        Kind::GetTextLayer => Some(Kind::TextLayer),
         _ => None,
     }
 }
