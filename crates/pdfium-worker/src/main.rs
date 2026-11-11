@@ -484,7 +484,10 @@ impl WorkerSession {
         let generation = read_u64(payload, 16).map_err(protocol_err)?;
         let page_index = read_u32(payload, 24).map_err(protocol_err)?;
         if self.identity != Some((tab_id, generation)) {
-            return Err((6, "GET_TEXT_LAYER does not match the active document".into()));
+            return Err((
+                6,
+                "GET_TEXT_LAYER does not match the active document".into(),
+            ));
         }
         let document = self
             .document
@@ -498,9 +501,12 @@ impl WorkerSession {
             .get(page_index as i32)
             .map_err(|e| (7, format!("could not open page {page_index}: {e}")))?;
         let page_height = page.height().value; // PDF user-space points, y=0 at bottom
-        let text_page = page
-            .text()
-            .map_err(|e| (7, format!("could not get text layer for page {page_index}: {e}")))?;
+        let text_page = page.text().map_err(|e| {
+            (
+                7,
+                format!("could not get text layer for page {page_index}: {e}"),
+            )
+        })?;
 
         // Binary encoding per span:
         //   x:        f32 BE  (4 bytes) — left edge in PDF points

@@ -22,7 +22,9 @@ fn startup_pdf_path() -> Option<String> {
 }
 
 #[tauri::command]
-async fn take_startup_pdf_path(state: tauri::State<'_, StartupPdfPath>) -> Result<Option<String>, String> {
+async fn take_startup_pdf_path(
+    state: tauri::State<'_, StartupPdfPath>,
+) -> Result<Option<String>, String> {
     state
         .0
         .lock()
@@ -52,7 +54,10 @@ async fn open_default_pdf_settings() -> Result<(), String> {
         if (result as isize) > 32 {
             Ok(())
         } else {
-            Err(format!("Windows could not open Default apps (ShellExecuteW returned {})", result as isize))
+            Err(format!(
+                "Windows could not open Default apps (ShellExecuteW returned {})",
+                result as isize
+            ))
         }
     })
     .await
@@ -180,7 +185,6 @@ async fn close_pdf(
 ) -> Result<(), String> {
     state.close_document(document_id, generation).await
 }
-
 
 #[tauri::command]
 async fn get_text_layer(

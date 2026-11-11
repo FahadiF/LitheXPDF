@@ -553,13 +553,7 @@ impl AppState {
         page_index: u32,
     ) -> Result<Vec<u8>, String> {
         let _operation = self.0.operation.lock().await;
-        let active = self
-            .0
-            .active
-            .lock()
-            .await
-            .clone()
-            .ok_or("No PDF is open")?;
+        let active = self.0.active.lock().await.clone().ok_or("No PDF is open")?;
         if !active_document_matches(Some(&active), &id, generation) {
             return Err("Document changed; text layer request is stale".into());
         }
