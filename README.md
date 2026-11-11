@@ -1,6 +1,6 @@
 # LitheXPDF
 
-A fast, lightweight PDF reader built with Rust. Open dozens of documents in tabs while keeping memory usage low.
+**A fast, lightweight PDF reader built with Rust. Open dozens of documents in tabs while keeping memory usage low.**
 
 <img width="1106" height="694" alt="LitheXPDF reader with dark theme" src="https://github.com/user-attachments/assets/ea50296f-ac00-428c-96e1-b8a7c77d8d5d" />
 
