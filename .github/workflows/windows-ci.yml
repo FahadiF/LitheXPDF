@@ -13,6 +13,8 @@ jobs:
   windows-x64:
     name: Windows x64 checks and MSI candidate
     runs-on: windows-latest
+    env:
+      MSI_BUNDLE_DIR: target/x86_64-pc-windows-msvc/release/bundle/msi
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -47,7 +49,7 @@ jobs:
       - name: Record MSI SHA-256
         shell: pwsh
         run: |
-          $msi = Get-ChildItem target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi | Select-Object -First 1
+          $msi = Get-ChildItem "$env:MSI_BUNDLE_DIR/*.msi" | Select-Object -First 1
           if (-not $msi) { throw 'The MSI build produced no installer.' }
           $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $msi.FullName).Hash.ToLowerInvariant()
           "$hash  $($msi.Name)" | Set-Content -LiteralPath "$($msi.FullName).sha256"
@@ -58,8 +60,8 @@ jobs:
         with:
           name: lithexpdf-windows-x64-msi
           path: |
-            target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
-            target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi.sha256
+            ${{ env.MSI_BUNDLE_DIR }}/*.msi
+            ${{ env.MSI_BUNDLE_DIR }}/*.msi.sha256
           if-no-files-found: error
           retention-days: 14
 
